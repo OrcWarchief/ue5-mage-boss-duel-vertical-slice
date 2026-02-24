@@ -4,6 +4,11 @@ DerivedDataCache/
 Intermediate/
 Saved/
 
+# Unreal (plugins too)
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+Plugins/**/Saved/
+
 # --- IDE / tooling ---
 .vs/
 .idea/
