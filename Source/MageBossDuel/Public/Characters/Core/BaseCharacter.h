@@ -104,6 +104,17 @@ protected:
     /** Hard -> Soft -> nullptr(FreeAim) */
     AActor* ResolveBasicAttackTarget() const;
 
+    /** Lock-on: 전방 Cone 내에서 가장 적절한 적 */
+    AActor* FindLockOnTarget(
+        const FVector& ViewLocation,
+        const FVector& ViewForward,
+        const FVector& SearchCenter,
+        float MaxDistance,
+        float MaxAngleDegrees,
+        bool bRequireLineOfSight,
+        ECollisionChannel VisibilityChannel
+    ) const;
+
     /** Soft Lock-on: 전방 Cone 내에서 가장 적절한 적 */
     AActor* FindSoftLockTarget(const FVector& ViewLocation, const FVector& ViewForward) const;
 
