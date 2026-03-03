@@ -30,7 +30,12 @@ APlayerCharacter::APlayerCharacter()
 
 void APlayerCharacter::Tick(float DeltaTime)
 {
-	// Super::Tick(DeltaTime);
+	Super::Tick(DeltaTime);
+
+	if (bLockOnActive)
+	{
+		UpdateLockOn(DeltaTime);
+	}
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -79,15 +84,15 @@ void APlayerCharacter::ToggleLockOn(const FInputActionValue& Value)
 		return;
 	}
 
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	FVector ViewLoc;
+	FRotator ViewRot;
+	Controller->GetPlayerViewPoint(ViewLoc, ViewRot);
 
-	const FVector ViewForward = ViewRotation.Vector();
+	const FVector ViewForward = ViewRot.Vector();
 	const FVector SearchCenter = GetActorLocation() + FVector(0, 0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * 0.5f);
 	
 	AActor* Target = FindLockOnTarget(
-		ViewLocation,
+		ViewLoc,
 		ViewForward,
 		SearchCenter,
 		LockOnMaxDistance,
@@ -123,6 +128,10 @@ void APlayerCharacter::StartLockOn(AActor* NewTarget)
 	bLockOnActive = true;
 	LockOnTarget = NewTarget;
 
+	// Lock On : character follow Controller Yaw;
+	bUseControllerRotationYaw = true;
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+
 	if (GEngine)
 	{
 		const FString Msg = FString::Printf(TEXT("StartLockOn() : Lock On (On) : %s"), *NewTarget->GetName());
@@ -135,8 +144,47 @@ void APlayerCharacter::StopLockOn()
 	bLockOnActive = false;
 	LockOnTarget = nullptr;
 
+	bUseControllerRotationYaw = false;
+	GetCharacterMovement()->bOrientRotationToMovement = true;
+
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Silver, TEXT("StopLockOn() : Lock On (Off)"));
+	}
+}
+
+void APlayerCharacter::UpdateLockOn(float DeltaTime)
+{
+	if (!IsLocallyControlled() || !Controller)
+	{
+		StopLockOn();
+		return;
+	}
+
+	if (!IsValid(LockOnTarget))
+	{
+		StopLockOn();
+		return;
+	}
+
+	FVector ViewLoc;
+	FRotator ViewRot;
+	Controller->GetPlayerViewPoint(ViewLoc, ViewRot);
+
+	const FVector AimLocation = GetTargetAimLocation(LockOnTarget);
+	const FVector To = AimLocation - ViewLoc;
+	if (To.IsNearlyZero()) { return; }
+
+	FRotator DesiredRot = To.Rotation();
+	DesiredRot.Roll = 0.f;
+	DesiredRot.Pitch = FMath::ClampAngle(DesiredRot.Pitch, -80.f, 80.f);
+
+	const FRotator CurrentControlRot = Controller->GetControlRotation();
+	const FRotator NextControlRot = FMath::RInterpTo(CurrentControlRot, DesiredRot, DeltaTime, LockOnInterpSpeed);
+	Controller->SetControlRotation(NextControlRot);
+
+	if (GEngine)
+	{
+		DrawDebugLine(GetWorld(), ViewLoc, AimLocation, FColor::Green, false, 0.f, 0, 2.f);
 	}
 }

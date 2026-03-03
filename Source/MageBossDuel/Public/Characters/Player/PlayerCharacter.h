@@ -74,6 +74,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Acquire")
 	TEnumAsByte<ECollisionChannel> LockOnVisibilityChannel = ECC_Visibility;
 
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Drive")
+	float LockOnInterpSpeed = 12.f;
+
 	void StartLockOn(AActor* NewTarget);
 	void StopLockOn();
+	void UpdateLockOn(float DeltaTime);
 };
