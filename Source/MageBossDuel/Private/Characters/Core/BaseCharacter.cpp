@@ -223,7 +223,7 @@ AActor* ABaseCharacter::ResolveBasicAttackTarget() const
 }
 
 AActor* ABaseCharacter::FindLockOnTarget(
-	const FVector& ViewLocation, 
+	const FVector& ViewLoc, 
 	const FVector& ViewForward, 
 	const FVector& SearchCenter, 
 	float MaxDistance, 
@@ -235,16 +235,16 @@ AActor* ABaseCharacter::FindLockOnTarget(
 	UWorld* World = GetWorld();
 	if (!World) { return nullptr; }
 
-	TArray<FOverlapResult> Candidates;
+	TArray<FOverlapResult> Overlaps;
 
 	FCollisionObjectQueryParams ObjectQueryParams;
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
 
-	FCollisionQueryParams QueryParams;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(LockOnOverlap), false);
 	QueryParams.AddIgnoredActor(this);
 
 	const bool bAny = World->OverlapMultiByObjectType(
-		Candidates,
+		Overlaps,
 		SearchCenter,
 		FQuat::Identity,
 		ObjectQueryParams,
@@ -262,18 +262,18 @@ AActor* ABaseCharacter::FindLockOnTarget(
 
 	const float CosThreshold = FMath::Cos(FMath::DegreesToRadians(MaxAngleDegrees));
 
-	for (const FOverlapResult& Candidate : Candidates)
+	for (const FOverlapResult& R : Overlaps)
 	{
-		AActor* TargetCandidate = Candidate.GetActor();
-		if (!IsValid(TargetCandidate) || TargetCandidate == this) { continue; }
+		AActor* Candidate = R.GetActor();
+		if (!IsValid(Candidate) || Candidate == this) { continue; }
 
-		if (const ABaseCharacter* BaseChar = Cast<ABaseCharacter>(TargetCandidate))
+		if (const ABaseCharacter* BaseChar = Cast<ABaseCharacter>(Candidate))
 		{
 			if (!BaseChar->IsAlive()) { continue; }
 		}
 
-		const FVector CandidateAimLocation = GetTargetAimLocation(TargetCandidate);
-		const FVector ToCandidate = CandidateAimLocation - ViewLocation;
+		const FVector AimLoc = GetTargetAimLocation(Candidate);
+		const FVector ToCandidate = AimLoc - ViewLoc;
 
 		const float Dist = ToCandidate.Size();
 		if (Dist <= KINDA_SMALL_NUMBER) { continue; }
@@ -292,13 +292,13 @@ AActor* ABaseCharacter::FindLockOnTarget(
 
 			const bool bHit = World->LineTraceSingleByChannel(
 				Hit,
-				ViewLocation,
-				CandidateAimLocation,
+				ViewLoc,
+				AimLoc,
 				VisibilityChannel,
 				LoSParams
 			);
 
-			if (bHit && Hit.GetActor() != TargetCandidate)
+			if (bHit && Hit.GetActor() != Candidate)
 			{
 				continue;
 			}
@@ -310,7 +310,7 @@ AActor* ABaseCharacter::FindLockOnTarget(
 		if (Score > BestScore)
 		{
 			BestScore = Score;
-			BestTarget = TargetCandidate;
+			BestTarget = Candidate;
 		}
 	}
 

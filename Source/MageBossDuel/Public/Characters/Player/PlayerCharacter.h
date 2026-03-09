@@ -40,6 +40,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_LockOn;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_TargetSwitchX;
+
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 	void ToggleLockOn(const FInputActionValue& Value);
@@ -80,4 +83,32 @@ private:
 	void StartLockOn(AActor* NewTarget);
 	void StopLockOn();
 	void UpdateLockOn(float DeltaTime);
+
+	// Switch LockOn
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Switch")
+	float TargetSwitchCooldown = 0.15f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Switch")
+	float TargetSwitchMinNormDx = 0.05f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Switch")
+	float TargetSwitchVerticalWeight = 0.35f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Switch")
+	float TargetSwitchDistanceWeight = 0.0005f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Switch")
+	float TargetSwitchMaxAngleDegree = 90.f;
+
+	bool bTargetSwitchReady = true;
+	float LastTargetSwitchTime = -9999.f;
+
+	UFUNCTION()
+	void OnTargetSwitchX(const FInputActionValue& Value);
+
+	UFUNCTION()
+	void OnTargetSwitchXReleased(const FInputActionValue& Value);
+
+	bool TrySwitchLockOnTarget(int32 DirectionSign);
+	AActor* FindSwitchTarget(int32 DirectionSign) const;
 };
