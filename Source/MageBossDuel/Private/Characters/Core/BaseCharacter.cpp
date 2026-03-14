@@ -222,84 +222,112 @@ AActor* ABaseCharacter::ResolveBasicAttackTarget() const
 	return nullptr;
 }
 
-AActor* ABaseCharacter::FindSoftLockTarget(const FVector& ViewLocation, const FVector& ViewForward) const
+AActor* ABaseCharacter::FindLockOnTarget(
+	const FVector& ViewLoc, 
+	const FVector& ViewForward, 
+	const FVector& SearchCenter, 
+	float MaxDistance, 
+	float MaxAngleDegrees, 
+	bool bRequireLineOfSight, 
+	ECollisionChannel VisibilityChannel
+) const
 {
 	UWorld* World = GetWorld();
 	if (!World) { return nullptr; }
-	
-	TArray<FOverlapResult> Candidates;
+
+	TArray<FOverlapResult> Overlaps;
 
 	FCollisionObjectQueryParams ObjectQueryParams;
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
 
-	FCollisionQueryParams QueryParams;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(LockOnOverlap), false);
 	QueryParams.AddIgnoredActor(this);
 
 	const bool bAny = World->OverlapMultiByObjectType(
-		Candidates,
-		ViewLocation,
+		Overlaps,
+		SearchCenter,
 		FQuat::Identity,
 		ObjectQueryParams,
-		FCollisionShape::MakeSphere(SoftLockMaxDistance),
+		FCollisionShape::MakeSphere(MaxDistance),
 		QueryParams
 	);
 
+	// 디버그 
+	DrawDebugSphere(World, SearchCenter, MaxDistance, 24, FColor::Cyan, false, 1.0f, 0, 1.0f);
+
 	if (!bAny) { return nullptr; }
 
-	double TargetScore = -DBL_MAX;
-	AActor* SoftTarget = nullptr;
-	const float CosThreshold = FMath::Cos(FMath::DegreesToRadians(SoftLockMaxAngleDegrees));
+	double BestScore = -DBL_MAX;
+	AActor* BestTarget = nullptr;
 
-	for (const FOverlapResult& Candidate : Candidates)
+	const float CosThreshold = FMath::Cos(FMath::DegreesToRadians(MaxAngleDegrees));
+
+	for (const FOverlapResult& R : Overlaps)
 	{
-		AActor* TargetCandidate = Candidate.GetActor();
+		AActor* Candidate = R.GetActor();
+		if (!IsValid(Candidate) || Candidate == this) { continue; }
 
-		if (!IsValid(TargetCandidate) || TargetCandidate == this) { continue; }
-		if (const ABaseCharacter* BaseChar = Cast<ABaseCharacter>(TargetCandidate))
+		if (const ABaseCharacter* BaseChar = Cast<ABaseCharacter>(Candidate))
 		{
 			if (!BaseChar->IsAlive()) { continue; }
 		}
 
-		FVector CandidateAimLocation = GetTargetAimLocation(TargetCandidate);
-		FVector ToCandidate = CandidateAimLocation - ViewLocation;
-		
-		const float dist = ToCandidate.Size();
-		if (dist <= KINDA_SMALL_NUMBER) continue;
+		const FVector AimLoc = GetTargetAimLocation(Candidate);
+		const FVector ToCandidate = AimLoc - ViewLoc;
 
-		const FVector dir = ToCandidate / dist;
-		const float CandidateDot = FVector::DotProduct(ViewForward, dir);
+		const float Dist = ToCandidate.Size();
+		if (Dist <= KINDA_SMALL_NUMBER) { continue; }
 
-		// Cone 모양 필터
-		if (CandidateDot < CosThreshold) continue;
+		const FVector Dir = ToCandidate / Dist;
+		const float Dot = FVector::DotProduct(ViewForward, Dir);
 
-		// 벽 뒤 등 시야 에서 안보이는거 제외
-		if (bSoftLockRequireLineOfSight)
+		// 전방 콘 모양 필터
+		if (Dot < CosThreshold) { continue; }
+
+		// LOS 필터 (벽 뒤 등 시야 에서 안보이는거 제외)
+		if (bRequireLineOfSight)
 		{
 			FHitResult Hit;
-			FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(SoftLockLoS), true, this);
+			FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(TargetAcquireLoS), true, this);
 
 			const bool bHit = World->LineTraceSingleByChannel(
 				Hit,
-				ViewLocation,
-				CandidateAimLocation,
-				SoftLockVisibilityChannel,
+				ViewLoc,
+				AimLoc,
+				VisibilityChannel,
 				LoSParams
 			);
 
-			if (bHit && Hit.GetActor() != TargetCandidate)
+			if (bHit && Hit.GetActor() != Candidate)
 			{
-				// 중간에 다른 오브젝트가 막고 있음
 				continue;
 			}
 		}
 
-		const double Score = CandidateDot * 1000.0 - dist;
-		if (Score > TargetScore)
+		// 스코어: 정면에 가까울수록 +, 멀수록 -
+		const double Score = (double)Dot * 1000.0 - (double)Dist;
+
+		if (Score > BestScore)
 		{
-			TargetScore = Score;
-			SoftTarget = TargetCandidate;
+			BestScore = Score;
+			BestTarget = Candidate;
 		}
 	}
+
+	return BestTarget;
+}
+
+AActor* ABaseCharacter::FindSoftLockTarget(const FVector& ViewLocation, const FVector& ViewForward) const
+{
+	AActor* SoftTarget = FindLockOnTarget(
+		ViewLocation,
+		ViewForward,
+		ViewLocation,
+		SoftLockMaxDistance,
+		SoftLockMaxAngleDegrees,
+		bSoftLockRequireLineOfSight,
+		SoftLockVisibilityChannel
+	);
 
 	return SoftTarget;
 }
