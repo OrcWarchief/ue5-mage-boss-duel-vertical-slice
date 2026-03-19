@@ -11,6 +11,7 @@
 #include "EnhancedInputComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/OverlapResult.h"
+#include "DrawDebugHelpers.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -41,6 +42,8 @@ void APlayerCharacter::Tick(float DeltaTime)
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
+
 	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (!ensure(EIC)) return;
 
@@ -54,6 +57,7 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		EIC->BindAction(IA_TargetSwitchX, ETriggerEvent::Completed, this, &APlayerCharacter::OnTargetSwitchXReleased);
 		EIC->BindAction(IA_TargetSwitchX, ETriggerEvent::Canceled,  this, &APlayerCharacter::OnTargetSwitchXReleased);
 	}
+	if (ensure(IA_Dodge))	EIC->BindAction(IA_Dodge, ETriggerEvent::Started, this, &APlayerCharacter::Dodge);
 }
 
 void APlayerCharacter::BeginPlay()
@@ -64,7 +68,8 @@ void APlayerCharacter::BeginPlay()
 void APlayerCharacter::Move(const FInputActionValue& Value)
 {
 	if (!Controller) return;
-	const FVector2D MovementVector = Value.Get<FVector2D>();
+	MovementVector = Value.Get<FVector2D>();
+	if (IsDodging()) return;
 	const FRotator Rotation = Controller->GetControlRotation();
 	const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
 
@@ -84,6 +89,7 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 void APlayerCharacter::ToggleLockOn(const FInputActionValue& Value)
 {
 	if (!IsLocallyControlled() || !Controller) return;
+	if (IsDodging()) return;
 
 	if (bLockOnActive && IsValid(LockOnTarget))
 	{
@@ -121,6 +127,11 @@ void APlayerCharacter::ToggleLockOn(const FInputActionValue& Value)
 void APlayerCharacter::Jump()
 {
 	Super::Jump();
+}
+
+void APlayerCharacter::Dodge(const FInputActionValue& Value)
+{
+	TryStartDodge(MovementVector);
 }
 
 AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const
@@ -316,7 +327,7 @@ AActor* APlayerCharacter::FindSwitchTarget(int32 DirectionSign) const
 
 	if (!bAny) { return nullptr; }
 
-	double BestScore = DBL_MAX;
+	float BestScore = FLT_MAX;
 	AActor* BestTarget = nullptr;
 
 	const float CosThreshold = FMath::Cos(FMath::DegreesToRadians(TargetSwitchMaxAngleDegree));

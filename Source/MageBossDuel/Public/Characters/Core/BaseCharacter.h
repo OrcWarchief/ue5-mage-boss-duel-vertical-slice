@@ -19,9 +19,21 @@ enum class ECharacterState : uint8
 {
     Idle      UMETA(DisplayName = "Idle"),
     Moving    UMETA(DisplayName = "Moving"),
+    Dodging   UMETA(DisplayName = "Dodging"),
     Attacking UMETA(DisplayName = "Attacking"),
     Hit       UMETA(DisplayName = "Hit"),
     Dead      UMETA(DisplayName = "Dead"),
+};
+
+/** 4방향으로 닷지 None일 경우 백스텝  */
+UENUM(BlueprintType)
+enum class EDodgeDirection : uint8
+{
+    None,
+    Forward,
+    Backward,
+    Left,
+    Right
 };
 
 /**
@@ -53,7 +65,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Stats|Health")
     bool IsAlive() const;
 
-        // ===== Combat =====
+    // ===== Combat =====
     UFUNCTION(BlueprintPure, Category = "Combat|Basic")
     bool CanBasicAttack() const;
 
@@ -80,6 +92,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Combat|Hit")
     bool CanBeInterrupted() const;
 
+    // ===== Dodge =====
+    bool TryStartDodge(const FVector2D& MoveInput);
+    bool IsDodging() const { return CurrentState == ECharacterState::Dodging; }
+
 protected:
     virtual void BeginPlay() override;
 
@@ -99,6 +115,15 @@ protected:
     /** 상태 전이(중앙집중). Dead는 되돌리지 않음. */
     UFUNCTION(BlueprintCallable, Category = "State", meta = (BlueprintProtected = "true"))
     void SetCharacterState(ECharacterState NewState);
+
+    // ===== 상태 머신 연결용 hook =====
+    virtual bool CanEnterDodgeFromCurrentState() const;
+    virtual void OnDodgeStarted_StateHook();
+    virtual void OnDodgeEnded_StateHook();
+
+    // ===== 락온 시스템 연결용 hook =====
+    virtual bool IsLockOnActive() const;
+    virtual AActor* GetCurrentLockOnTarget() const;
 
     // ===== Targeting Helpers (3-tier) =====
     /** Hard -> Soft -> nullptr(FreeAim) */
@@ -130,6 +155,56 @@ protected:
     // ===== Mana Helpers =====
     bool HasEnoughMana(float Cost) const;
     bool TryConsumeMana(float Cost);
+
+    // ===== Dodge =====
+    /** 입력시 Forward Roll 몽타주 무입력시 Backstep 몽타주 */
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
+    TObjectPtr<UAnimMontage> DodgeForwardRollMontage = nullptr;
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
+    TObjectPtr<UAnimMontage> DodgeBackwardRollMontage = nullptr;
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
+    TObjectPtr<UAnimMontage> DodgeLeftMontage = nullptr;
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
+    TObjectPtr<UAnimMontage> DodgeRightMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
+    TObjectPtr<UAnimMontage> DodgeNeutralBackstepMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge")
+    float MoveInputDeadZone = 0.25f;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Dodge|Runtime", meta = (AllowPrivateAccess = "true"))
+    EDodgeDirection CurrentDodgeDirection = EDodgeDirection::None;
+
+    // 회피 전 회전 관련 설정 저장
+    bool bSavedOrientRotationToMovement = false;
+    bool bSavedUseControllerDesiredRotation = false;
+    bool bSavedUseControllerRotationYaw = false;
+
+    bool CanStartDodge() const;
+    bool HasMeaningfulMoveInput(const FVector2D& MoveInput) const;
+
+    // 공통
+    FVector GetDesiredMoveWorldDirection(const FVector2D& MoveInput) const;
+    void FaceWorldDirection(const FVector& WorldDirection);
+
+    // 락온 기준축
+    FVector GetLockOnBasisForward() const;
+    FVector GetLockOnBasisRight() const;
+
+    // 방향 선택
+    EDodgeDirection SelectDodgeDirection(const FVector2D& MoveInput) const;
+    UAnimMontage* GetDodgeMontage(EDodgeDirection Direction) const;
+
+    // 실제로 구를 월드 방향
+    // 락온 OFF: 입력 방향 그대로(아날로그 각도 유지)
+    // 락온 ON : 타겟 기준 4방향으로 정규화
+    void BeginDodge(UAnimMontage* MontageToPlay, EDodgeDirection Direction);
+    void EndDodge();
+    void OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 
 protected:
