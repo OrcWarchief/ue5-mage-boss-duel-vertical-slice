@@ -51,18 +51,19 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	{
 		EIC->BindAction(IA_Move, ETriggerEvent::Triggered, this, &APlayerCharacter::Move);
 		EIC->BindAction(IA_Move, ETriggerEvent::Completed, this, &APlayerCharacter::OnMoveReleased);
-		EIC->BindAction(IA_Move, ETriggerEvent::Canceled, this, &APlayerCharacter::OnMoveReleased);
-	}
-	if (ensure(IA_Look))	EIC->BindAction(IA_Look, ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
-	if (IA_Jump)			EIC->BindAction(IA_Jump, ETriggerEvent::Started, this, &APlayerCharacter::Jump);
-	if (ensure(IA_LockOn))	EIC->BindAction(IA_LockOn, ETriggerEvent::Started, this, &APlayerCharacter::ToggleLockOn);
+		EIC->BindAction(IA_Move, ETriggerEvent::Canceled,  this, &APlayerCharacter::OnMoveReleased);
+	} 
+	if (ensure(IA_Look))	EIC->BindAction(IA_Look,   ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
+	if (IA_Jump)			EIC->BindAction(IA_Jump,   ETriggerEvent::Started,   this, &APlayerCharacter::Jump);
+	if (ensure(IA_LockOn))	EIC->BindAction(IA_LockOn, ETriggerEvent::Started,   this, &APlayerCharacter::ToggleLockOn);
 	if (ensure(IA_TargetSwitchX))
 	{
 		EIC->BindAction(IA_TargetSwitchX, ETriggerEvent::Triggered, this, &APlayerCharacter::OnTargetSwitchX);
 		EIC->BindAction(IA_TargetSwitchX, ETriggerEvent::Completed, this, &APlayerCharacter::OnTargetSwitchXReleased);
 		EIC->BindAction(IA_TargetSwitchX, ETriggerEvent::Canceled,  this, &APlayerCharacter::OnTargetSwitchXReleased);
 	}
-	if (ensure(IA_Dodge))	EIC->BindAction(IA_Dodge, ETriggerEvent::Started, this, &APlayerCharacter::Dodge);
+	if (ensure(IA_Dodge))		EIC->BindAction(IA_Dodge,		ETriggerEvent::Started, this, &APlayerCharacter::Dodge);
+	if (ensure(IA_BasicAttack))	EIC->BindAction(IA_BasicAttack, ETriggerEvent::Started, this, &APlayerCharacter::BasicAttack);
 }
 
 void APlayerCharacter::BeginPlay()
@@ -142,6 +143,11 @@ void APlayerCharacter::Jump()
 void APlayerCharacter::Dodge(const FInputActionValue& Value)
 {
 	TryStartDodge(MovementVector);
+}
+
+void APlayerCharacter::BasicAttack(const FInputActionValue& Value)
+{
+	StartBasicAttack();
 }
 
 AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const

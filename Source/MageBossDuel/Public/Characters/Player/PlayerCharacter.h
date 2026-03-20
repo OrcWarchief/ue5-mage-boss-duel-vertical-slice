@@ -47,6 +47,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_Dodge;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_BasicAttack;
+
 	FVector2D MovementVector = FVector2D::ZeroVector;
 
 	void Move(const FInputActionValue& Value);
@@ -55,6 +58,7 @@ protected:
 	void ToggleLockOn(const FInputActionValue& Value);
 	virtual void Jump() override;
 	void Dodge(const FInputActionValue& Value);
+	void BasicAttack(const FInputActionValue& Value);
 
 	virtual AActor* GetLockOnTargetActor_Implementation() const override;
 

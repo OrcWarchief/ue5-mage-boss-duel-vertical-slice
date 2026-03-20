@@ -178,6 +178,7 @@ bool ABaseCharacter::CanBasicAttack() const
 
 void ABaseCharacter::StartBasicAttack()
 {
+	UE_LOG(LogTemp, Warning, TEXT("StartBasicAttack"));
 	if (!CanBasicAttack())
 	{
 		return;
@@ -498,10 +499,6 @@ bool ABaseCharacter::TryStartDodge(const FVector2D& MoveInput)
 
 	if (!MontageToPlay)
 	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("[%s] Dodge montage is missing for direction %d"),
-			*GetName(),
-			static_cast<int32>(Direction));
 		return false;
 	}
 
