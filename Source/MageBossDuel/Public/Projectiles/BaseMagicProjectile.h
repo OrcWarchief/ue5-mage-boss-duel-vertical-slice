@@ -6,6 +6,9 @@
 #include "GameFramework/Actor.h"
 #include "BaseMagicProjectile.generated.h"
 
+class USphereComponent;
+class UProjectileMovementComponent;
+
 UCLASS()
 class MAGEBOSSDUEL_API ABaseMagicProjectile : public AActor
 {
@@ -16,8 +19,16 @@ public:
 	ABaseMagicProjectile();
 
 protected:
-	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+
+	UPROPERTY(EditAnywhere)
+	TObjectPtr<USphereComponent> CollisionComp;
+
+	UPROPERTY(EditAnywhere)
+	TObjectPtr<UStaticMeshComponent> MeshComp;
+
+	UPROPERTY(EditAnywhere)
+	TObjectPtr<UProjectileMovementComponent> ProjectileMovement;
 
 public:	
 	// Called every frame
