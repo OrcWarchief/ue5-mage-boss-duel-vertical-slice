@@ -12,6 +12,46 @@
 #include "Engine/OverlapResult.h"
 #include "Animation/AnimInstance.h"
 
+namespace
+{
+	EDodgeDirection SelectEightWayDirectionFromAxes(const float ForwardValue, const float RightValue)
+	{
+		const float SignedAngleDegrees = FMath::UnwindDegrees(
+			FMath::RadiansToDegrees(FMath::Atan2(RightValue, ForwardValue)));
+
+		if (SignedAngleDegrees > -22.5f && SignedAngleDegrees <= 22.5f)
+		{
+			return EDodgeDirection::Forward;
+		}
+		if (SignedAngleDegrees > 22.5f && SignedAngleDegrees <= 67.5f)
+		{
+			return EDodgeDirection::ForwardRight;
+		}
+		if (SignedAngleDegrees > 67.5f && SignedAngleDegrees <= 112.5f)
+		{
+			return EDodgeDirection::Right;
+		}
+		if (SignedAngleDegrees > 112.5f && SignedAngleDegrees <= 157.5f)
+		{
+			return EDodgeDirection::BackwardRight;
+		}
+		if (SignedAngleDegrees > 157.5f || SignedAngleDegrees <= -157.5f)
+		{
+			return EDodgeDirection::Backward;
+		}
+		if (SignedAngleDegrees > -157.5f && SignedAngleDegrees <= -112.5f)
+		{
+			return EDodgeDirection::BackwardLeft;
+		}
+		if (SignedAngleDegrees > -112.5f && SignedAngleDegrees <= -67.5f)
+		{
+			return EDodgeDirection::Left;
+		}
+
+		return EDodgeDirection::ForwardLeft;
+	}
+}
+
 ABaseCharacter::ABaseCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -692,53 +732,28 @@ EDodgeDirection ABaseCharacter::SelectDodgeDirection(const FVector2D& MoveInput)
 {
 	const bool bLockedOn = IsLockOnActive() && IsValid(GetCurrentLockOnTarget());
 
-	if (bLockedOn)
-	{
-		if (!HasMeaningfulMoveInput(MoveInput))
-		{
-			return EDodgeDirection::Backward;
-		}
-
-		const FVector DesiredWorldDir = GetDesiredMoveWorldDirection(MoveInput);
-		if (DesiredWorldDir.IsNearlyZero())
-		{
-			return EDodgeDirection::Backward;
-		}
-
-		const FVector RefForward = GetLockOnBasisForward();
-		const FVector RefRight = GetLockOnBasisRight();
-
-		const float ForwardValue = FVector::DotProduct(DesiredWorldDir, RefForward);
-		const float RightValue = FVector::DotProduct(DesiredWorldDir, RefRight);
-
-		if (FMath::Abs(ForwardValue) >= FMath::Abs(RightValue))
-		{
-			return (ForwardValue >= 0.f) ? EDodgeDirection::Forward : EDodgeDirection::Backward;
-		}
-		
-		return (RightValue >= 0.f) ? EDodgeDirection::Right : EDodgeDirection::Left;
-	}
-	
 	if (!HasMeaningfulMoveInput(MoveInput))
 	{
-		return EDodgeDirection::Forward;
+		return bLockedOn ? EDodgeDirection::Backward : EDodgeDirection::Forward;
 	}
 
 	const FVector DesiredWorldDir = GetDesiredMoveWorldDirection(MoveInput);
 	if (DesiredWorldDir.IsNearlyZero())
 	{
-		return EDodgeDirection::Forward;
+		return bLockedOn ? EDodgeDirection::Backward : EDodgeDirection::Forward;
 	}
+	
+	const FVector RefForward = bLockedOn
+		? GetLockOnBasisForward()
+		: GetActorForwardVector().GetSafeNormal2D();
+	const FVector RefRight = bLockedOn
+		? GetLockOnBasisRight()
+		: GetActorRightVector().GetSafeNormal2D();
+	
+	const float ForwardValue = FVector::DotProduct(DesiredWorldDir, RefForward);
+	const float RightValue = FVector::DotProduct(DesiredWorldDir, RefRight);
 
-	const float ForwardValue = FVector::DotProduct(DesiredWorldDir, GetActorForwardVector());
-	const float RightValue = FVector::DotProduct(DesiredWorldDir, GetActorRightVector());
-
-	if (FMath::Abs(ForwardValue) >= FMath::Abs(RightValue))
-	{
-		return (ForwardValue >= 0.f) ? EDodgeDirection::Forward : EDodgeDirection::Backward;
-	}
-
-	return (RightValue >= 0.f) ? EDodgeDirection::Right : EDodgeDirection::Left;
+	return SelectEightWayDirectionFromAxes(ForwardValue, RightValue);
 }
 
 UAnimMontage* ABaseCharacter::GetDodgeMontage(EDodgeDirection Direction) const
@@ -753,6 +768,14 @@ UAnimMontage* ABaseCharacter::GetDodgeMontage(EDodgeDirection Direction) const
 		return DodgeLeftMontage;
 	case EDodgeDirection::Right:
 		return DodgeRightMontage;
+	case EDodgeDirection::ForwardLeft:
+		return DodgeForwardLeftMontage;
+	case EDodgeDirection::ForwardRight:
+		return DodgeForwardRightMontage;
+	case EDodgeDirection::BackwardLeft:
+		return DodgeBackwardLeftMontage;
+	case EDodgeDirection::BackwardRight:
+		return DodgeBackwardRightMontage;
 	default:
 		return nullptr;
 	}
@@ -764,6 +787,10 @@ void ABaseCharacter::BeginDodge(UAnimMontage* MontageToPlay, EDodgeDirection Dir
 	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
 	
 	if (!AnimInst || !MoveComp || !MontageToPlay) { return; }
+
+	UE_LOG(LogTemp, Warning, TEXT("BeginDodge | Montage=%s | Direction=%d"),
+		*GetNameSafe(MontageToPlay),
+		static_cast<int32>(Direction));
 
 	CurrentDodgeDirection = Direction;
 	OnDodgeStarted_StateHook();
@@ -797,7 +824,12 @@ void ABaseCharacter::BeginDodge(UAnimMontage* MontageToPlay, EDodgeDirection Dir
 
 void ABaseCharacter::EndDodge()
 {
-	if (CurrentState != ECharacterState::Dodging) { return; }
+	UAnimInstance* AnimInst = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+
+	UE_LOG(LogTemp, Warning, TEXT("EndDodge called | State=%d | Dir=%d | ActiveMontage=%s"),
+		static_cast<int32>(CurrentState),
+		static_cast<int32>(CurrentDodgeDirection),
+		*GetNameSafe(AnimInst ? AnimInst->GetCurrentActiveMontage() : nullptr));
 
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
@@ -808,10 +840,16 @@ void ABaseCharacter::EndDodge()
 	bUseControllerRotationYaw = bSavedUseControllerRotationYaw;
 	CurrentDodgeDirection = EDodgeDirection::None;
 
-	OnDodgeEnded_StateHook();
+	if (CurrentState == ECharacterState::Dodging)
+	{
+		OnDodgeEnded_StateHook();
+	}
 }
 
 void ABaseCharacter::OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
+	UE_LOG(LogTemp, Warning, TEXT("OnDodgeMontageEnded | Montage=%s | Interrupted=%d"),
+		*GetNameSafe(Montage),
+		bInterrupted ? 1 : 0);
 	EndDodge();
 }

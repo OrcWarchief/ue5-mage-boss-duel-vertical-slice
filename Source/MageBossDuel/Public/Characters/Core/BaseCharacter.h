@@ -29,11 +29,15 @@ enum class ECharacterState : uint8
 UENUM(BlueprintType)
 enum class EDodgeDirection : uint8
 {
-    None,
-    Forward,
-    Backward,
-    Left,
-    Right
+    None = 0,
+    Forward = 1,
+    Backward = 2,
+    Left = 3,
+    Right = 4,
+    ForwardLeft = 5,
+    ForwardRight = 6,
+    BackwardLeft = 7,
+    BackwardRight = 8
 };
 
 /**
@@ -169,6 +173,18 @@ protected:
     
     UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
     TObjectPtr<UAnimMontage> DodgeRightMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
+    TObjectPtr<UAnimMontage> DodgeForwardLeftMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
+    TObjectPtr<UAnimMontage> DodgeForwardRightMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
+    TObjectPtr<UAnimMontage> DodgeBackwardLeftMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
+    TObjectPtr<UAnimMontage> DodgeBackwardRightMontage = nullptr;
 
     UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
     TObjectPtr<UAnimMontage> DodgeNeutralBackstepMontage = nullptr;

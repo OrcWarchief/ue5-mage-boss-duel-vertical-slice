@@ -50,6 +50,7 @@ protected:
 	FVector2D MovementVector = FVector2D::ZeroVector;
 
 	void Move(const FInputActionValue& Value);
+	void OnMoveReleased(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 	void ToggleLockOn(const FInputActionValue& Value);
 	virtual void Jump() override;

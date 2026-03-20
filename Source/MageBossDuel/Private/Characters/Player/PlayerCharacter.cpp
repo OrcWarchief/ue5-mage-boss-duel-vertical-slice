@@ -47,7 +47,12 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (!ensure(EIC)) return;
 
-	if (ensure(IA_Move))	EIC->BindAction(IA_Move, ETriggerEvent::Triggered, this, &APlayerCharacter::Move);
+	if (ensure(IA_Move))
+	{
+		EIC->BindAction(IA_Move, ETriggerEvent::Triggered, this, &APlayerCharacter::Move);
+		EIC->BindAction(IA_Move, ETriggerEvent::Completed, this, &APlayerCharacter::OnMoveReleased);
+		EIC->BindAction(IA_Move, ETriggerEvent::Canceled, this, &APlayerCharacter::OnMoveReleased);
+	}
 	if (ensure(IA_Look))	EIC->BindAction(IA_Look, ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
 	if (IA_Jump)			EIC->BindAction(IA_Jump, ETriggerEvent::Started, this, &APlayerCharacter::Jump);
 	if (ensure(IA_LockOn))	EIC->BindAction(IA_LockOn, ETriggerEvent::Started, this, &APlayerCharacter::ToggleLockOn);
@@ -77,6 +82,11 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
 	AddMovementInput(ForwardDirection, MovementVector.Y);
 	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 	AddMovementInput(RightDirection, MovementVector.X);
+}
+
+void APlayerCharacter::OnMoveReleased(const FInputActionValue& Value)
+{
+	MovementVector = FVector2D::ZeroVector;
 }
 
 void APlayerCharacter::Look(const FInputActionValue& Value)
@@ -173,6 +183,11 @@ void APlayerCharacter::StopLockOn()
 
 void APlayerCharacter::UpdateLockOn(float DeltaTime)
 {
+	if (IsDodging())
+	{
+		return;
+	}
+
 	if (!IsLocallyControlled() || !Controller)
 	{
 		StopLockOn();
