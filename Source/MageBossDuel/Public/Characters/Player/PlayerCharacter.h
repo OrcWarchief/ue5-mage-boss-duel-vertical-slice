@@ -11,6 +11,7 @@ class UInputMappingContext;
 class UInputAction;
 class USpringArmComponent;
 class UCameraComponent;
+class UAnimMontage;
 
 /**
  * 
@@ -42,14 +43,23 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_TargetSwitchX;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Dodge;
+
+	FVector2D MovementVector = FVector2D::ZeroVector;
 
 	void Move(const FInputActionValue& Value);
+	void OnMoveReleased(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 	void ToggleLockOn(const FInputActionValue& Value);
 	virtual void Jump() override;
+	void Dodge(const FInputActionValue& Value);
 
 	virtual AActor* GetLockOnTargetActor_Implementation() const override;
 
+	virtual bool IsLockOnActive() const override { return bLockOnActive; }
+	virtual AActor* GetCurrentLockOnTarget() const override { return LockOnTarget.Get(); }
 private:
 	// Camera
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
