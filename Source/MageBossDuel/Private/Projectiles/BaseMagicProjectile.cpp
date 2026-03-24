@@ -4,18 +4,26 @@
 #include "Projectiles/BaseMagicProjectile.h"
 #include "Components/SphereComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "GameFramework/Character.h"
 
 // Sets default values
 ABaseMagicProjectile::ABaseMagicProjectile()
 {
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 
 	CollisionComp = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionComp"));
 	RootComponent = CollisionComp;
 	CollisionComp->InitSphereRadius(16.f);
 
+	CollisionComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CollisionComp->SetCollisionObjectType(ECC_WorldDynamic);
+	CollisionComp->SetCollisionResponseToAllChannels(ECR_Ignore);
+	CollisionComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	CollisionComp->SetGenerateOverlapEvents(true);
+	CollisionComp->OnComponentBeginOverlap.AddDynamic(this, &ABaseMagicProjectile::OnProjectileBeginOverlap);
+
 	MeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComp"));
-	MeshComp->SetupAttachment(RootComponent);
+	MeshComp->SetupAttachment(CollisionComp);
 	MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	ProjectileMovement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovement"));
@@ -33,7 +41,41 @@ ABaseMagicProjectile::ABaseMagicProjectile()
 void ABaseMagicProjectile::BeginPlay()
 {
 	Super::BeginPlay();
+	
+	AActor* OwnerActor = GetOwner();
+	if (OwnerActor)
+	{
+		CollisionComp->IgnoreActorWhenMoving(OwnerActor, true);
+	}
+
+	AActor* InstigatorActor = GetInstigator();
+	if (InstigatorActor && InstigatorActor != OwnerActor)
+	{
+		CollisionComp->IgnoreActorWhenMoving(InstigatorActor, true);
+	}
+
 	ProjectileMovement->Velocity = GetActorForwardVector() * ProjectileMovement->InitialSpeed;
+}
+
+void ABaseMagicProjectile::OnProjectileBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	if (!IsValid(OtherActor) || !IsValid(OtherComp))
+	{
+		return;
+	}
+
+	if (OtherActor == this || OtherActor == GetOwner() || OtherActor == GetInstigator())
+	{
+		return;
+	}
+
+	ACharacter* HitCharacter = Cast<ACharacter>(OtherActor);
+	if (!HitCharacter)
+	{
+		return;
+	}
+
+	Destroy();
 }
 
 // Called every frame
