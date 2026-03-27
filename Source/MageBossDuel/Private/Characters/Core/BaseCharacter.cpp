@@ -456,7 +456,7 @@ void ABaseCharacter::FireBasicAttackProjectile(AActor* TargetActor)
 
 	if (SpawnedProjectile)
 	{
-		// 프로젝타일 초기 세팅?
+		SpawnedProjectile->SetDamage(BaseAttackDamage);
 	}
 }
 

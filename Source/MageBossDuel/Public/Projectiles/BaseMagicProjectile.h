@@ -30,6 +30,9 @@ protected:
 	UPROPERTY(EditAnywhere)
 	TObjectPtr<UProjectileMovementComponent> ProjectileMovement;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float Damage = 10.f;
+
 	UFUNCTION()
 	void OnProjectileBeginOverlap(
 		UPrimitiveComponent* OverlappedComponent,
@@ -40,8 +43,15 @@ protected:
 		const FHitResult& SweepResult
 	);
 
+
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void SetDamage(float NewDamage);
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	float GetDamage() const { return Damage; }
 
 };

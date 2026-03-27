@@ -4,7 +4,7 @@
 #include "Projectiles/BaseMagicProjectile.h"
 #include "Components/SphereComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
-#include "GameFramework/Character.h"
+#include "Characters/Core/BaseCharacter.h"
 
 // Sets default values
 ABaseMagicProjectile::ABaseMagicProjectile()
@@ -68,12 +68,25 @@ void ABaseMagicProjectile::OnProjectileBeginOverlap(UPrimitiveComponent* Overlap
 	{
 		return;
 	}
-
-	ACharacter* HitCharacter = Cast<ACharacter>(OtherActor);
-	if (!HitCharacter)
+	
+	ABaseCharacter* HitCharacter = Cast<ABaseCharacter>(OtherActor);
+	if (!HitCharacter || !HitCharacter->IsAlive())
 	{
 		return;
 	}
+
+	ABaseCharacter* AttackCharacter = Cast<ABaseCharacter>(GetOwner());
+	if (!AttackCharacter)
+	{
+		AttackCharacter = Cast<ABaseCharacter>(GetInstigator());
+	}
+
+	if (HitCharacter == AttackCharacter)
+	{
+		return;
+	}
+
+	HitCharacter->ApplyDamage(Damage, AttackCharacter);
 
 	Destroy();
 }
@@ -83,5 +96,10 @@ void ABaseMagicProjectile::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+}
+
+void ABaseMagicProjectile::SetDamage(float NewDamage)
+{
+	Damage = FMath::Max(0.f, NewDamage);
 }
 
