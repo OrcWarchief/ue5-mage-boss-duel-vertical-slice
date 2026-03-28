@@ -2,6 +2,8 @@
 
 
 #include "PlayerController/MBDPlayerController.h"
+#include "UI/HUD/PlayerHUDWidget.h"
+
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 
@@ -20,6 +22,15 @@ void AMBDPlayerController::BeginPlay()
 
         FInputModeGameOnly Mode;
         SetInputMode(Mode);
+
+        if (PlayerHUDWidgetClass)
+        {
+            PlayerHUDWidget = CreateWidget<UPlayerHUDWidget>(this, PlayerHUDWidgetClass);
+            if (PlayerHUDWidget)
+            {
+                PlayerHUDWidget->AddToViewport();
+            }
+        }
     }
 }
 

@@ -7,6 +7,7 @@
 #include "MBDPlayerController.generated.h"
 
 class UInputMappingContext;
+class UPlayerHUDWidget;
 /**
  * 
  */
@@ -17,10 +18,17 @@ class MAGEBOSSDUEL_API AMBDPlayerController : public APlayerController
 public:
     AMBDPlayerController();
 
+    UPROPERTY(EditDefaultsOnly, Category = "UI")
+    TSubclassOf<UPlayerHUDWidget> PlayerHUDWidgetClass;
+
 protected:
     virtual void BeginPlay() override;
 
     void ApplyMappingContexts();
+
+    UPROPERTY()
+    TObjectPtr<UPlayerHUDWidget> PlayerHUDWidget;
+
 public:
     UPROPERTY(EditDefaultsOnly, Category = "Input|Mapping")
     TObjectPtr<UInputMappingContext> IMC_Locomotion;

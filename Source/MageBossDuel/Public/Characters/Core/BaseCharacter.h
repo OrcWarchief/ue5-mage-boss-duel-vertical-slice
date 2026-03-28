@@ -69,6 +69,24 @@ public:
     UFUNCTION(BlueprintPure, Category = "Stats|Health")
     bool IsAlive() const;
 
+    UFUNCTION(BlueprintPure, Category = "Stats|Health")
+    float GetCurrentHealth() const { return CurrentHealth; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Health")
+    float GetMaxHealth() const { return MaxHealth; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Health")
+    float GetHealthPercent() const { return MaxHealth > 0.f ? CurrentHealth / MaxHealth : 0.f; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Mana")
+    float GetCurrentMana() const { return CurrentMana; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Mana")
+    float GetMaxMana() const { return MaxMana; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Mana")
+    float GetManaPercent() const { return MaxMana > 0.f ? CurrentMana / MaxMana : 0.f; }
+
     // ===== Combat =====
     UFUNCTION(BlueprintPure, Category = "Combat|Basic")
     bool CanBasicAttack() const;
