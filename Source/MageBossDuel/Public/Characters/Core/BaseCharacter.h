@@ -25,7 +25,7 @@ enum class ECharacterState : uint8
     Dead      UMETA(DisplayName = "Dead"),
 };
 
-/** 4방향으로 닷지 None일 경우 백스텝  */
+/** 8방향으로 닷지 */
 UENUM(BlueprintType)
 enum class EDodgeDirection : uint8
 {
@@ -39,6 +39,13 @@ enum class EDodgeDirection : uint8
     BackwardLeft = 7,
     BackwardRight = 8
 };
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+    FOnCharacterStatChanged,
+    float, CurrentValue,
+    float, MaxValue,
+    float, Percent
+);
 
 /**
  * 플레이어/보스 공용 베이스.
@@ -86,6 +93,13 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Stats|Mana")
     float GetManaPercent() const { return MaxMana > 0.f ? CurrentMana / MaxMana : 0.f; }
+
+    // ===== HUD / UI =====
+    UPROPERTY(BlueprintAssignable, Category = "UI|Events")
+    FOnCharacterStatChanged OnHealthChanged;
+    
+    UPROPERTY(BlueprintAssignable, Category = "UI|Events")
+    FOnCharacterStatChanged OnManaChanged;
 
     // ===== Combat =====
     UFUNCTION(BlueprintPure, Category = "Combat|Basic")
@@ -177,6 +191,8 @@ protected:
     // ===== Mana Helpers =====
     bool HasEnoughMana(float Cost) const;
     bool TryConsumeMana(float Cost);
+    void BroadcastHealthChanged();
+    void BroadcastManaChanged();
 
     // ===== Dodge =====
     /** 입력시 Forward Roll 몽타주 무입력시 Backstep 몽타주 */

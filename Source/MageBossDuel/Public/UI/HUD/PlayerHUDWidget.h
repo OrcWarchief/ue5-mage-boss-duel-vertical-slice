@@ -8,16 +8,20 @@
 
 class UProgressBar;
 class UTextBlock;
-class APlayerCharacter;
+class ABaseCharacter;
 
 UCLASS()
 class MAGEBOSSDUEL_API UPlayerHUDWidget : public UUserWidget
 {
 	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintCallable, Category = "HUD")
+	void InitializeFromCharacter(ABaseCharacter* InCharacter);
 	
 protected:
 	virtual void NativeConstruct() override;
-	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual void NativeDestruct() override;
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UProgressBar> HealthBar;
@@ -33,8 +37,18 @@ protected:
 
 private:
 	UPROPERTY()
-	TObjectPtr<APlayerCharacter> CachedPlayerCharacter;
+	TObjectPtr<ABaseCharacter> CachedCharacter;
 
-	void CachePlayerCharacter();
-	void RefreshHUD();
+	void BindToCharacter();
+	void UnbindFromCharacter();
+	void RefreshAllFromCharacter();
+	
+	void UpdateHealthUI(float CurrentValue, float MaxValue, float Percent);
+	void UpdateManaUI(float CurrentValue, float MaxValue, float Percent);
+
+	UFUNCTION()
+	void HandleHealthChanged(float CurrentValue, float MaxValue, float Percent);
+
+	UFUNCTION()
+	void HandleManaChanged(float CurrentValue, float MaxValue, float Percent);
 };

@@ -3,68 +3,107 @@
 
 #include "UI/HUD/PlayerHUDWidget.h"
 
-#include "Characters/Player/PlayerCharacter.h"
+#include "Characters/Core/BaseCharacter.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
+
+void UPlayerHUDWidget::InitializeFromCharacter(ABaseCharacter* InCharacter)
+{
+	if (CachedCharacter == InCharacter)
+	{
+		RefreshAllFromCharacter();
+		return;
+	}
+
+	UnbindFromCharacter();
+	CachedCharacter = InCharacter;
+	BindToCharacter();
+	RefreshAllFromCharacter();
+}
 
 void UPlayerHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	CachePlayerCharacter();
-	RefreshHUD();
+	InitializeFromCharacter(Cast<ABaseCharacter>(GetOwningPlayerPawn()));
 }
 
-void UPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+void UPlayerHUDWidget::NativeDestruct()
 {
-	Super::NativeTick(MyGeometry, InDeltaTime);
+	UnbindFromCharacter();
 
-	if (!IsValid(CachedPlayerCharacter))
-	{
-		CachePlayerCharacter();
-	}
-
-	RefreshHUD();
+	Super::NativeDestruct();
 }
 
-void UPlayerHUDWidget::CachePlayerCharacter()
+void UPlayerHUDWidget::BindToCharacter()
 {
-	CachedPlayerCharacter = Cast<APlayerCharacter>(GetOwningPlayerPawn());
+	if (!IsValid(CachedCharacter)) { return; }
+
+	CachedCharacter->OnHealthChanged.AddUniqueDynamic(this, &UPlayerHUDWidget::HandleHealthChanged);
+	CachedCharacter->OnManaChanged.AddUniqueDynamic(this, &UPlayerHUDWidget::HandleManaChanged);
 }
 
-void UPlayerHUDWidget::RefreshHUD()
+void UPlayerHUDWidget::UnbindFromCharacter()
 {
-	if (!IsValid(CachedPlayerCharacter)) { return; }
+	if (!IsValid(CachedCharacter)) { return; }
 
+	CachedCharacter->OnHealthChanged.RemoveDynamic(this, &UPlayerHUDWidget::HandleHealthChanged);
+	CachedCharacter->OnManaChanged.RemoveDynamic(this, &UPlayerHUDWidget::HandleManaChanged);
+}
+
+void UPlayerHUDWidget::RefreshAllFromCharacter()
+{
+	if (!IsValid(CachedCharacter)) { return; }
+
+	UpdateHealthUI(
+		CachedCharacter->GetCurrentHealth(),
+		CachedCharacter->GetMaxHealth(),
+		CachedCharacter->GetHealthPercent()
+	);
+
+	UpdateManaUI(
+		CachedCharacter->GetCurrentMana(),
+		CachedCharacter->GetMaxMana(),
+		CachedCharacter->GetManaPercent()
+	);
+}
+
+void UPlayerHUDWidget::UpdateHealthUI(float CurrentValue, float MaxValue, float Percent)
+{
 	if (HealthBar)
 	{
-		HealthBar->SetPercent(CachedPlayerCharacter->GetHealthPercent());
-	}
-
-	if (ManaBar)
-	{
-		ManaBar->SetPercent(CachedPlayerCharacter->GetManaPercent());
+		HealthBar->SetPercent(Percent);
 	}
 
 	if (HealthText)
 	{
 		HealthText->SetText(FText::FromString(
-			FString::Printf(
-				TEXT("HP %.0f / %.0f"),
-				CachedPlayerCharacter->GetCurrentHealth(),
-				CachedPlayerCharacter->GetMaxHealth()
-			)
+			FString::Printf(TEXT("HP %.0f / %.0f"), CurrentValue, MaxValue)
 		));
+	}
+}
+
+void UPlayerHUDWidget::UpdateManaUI(float CurrentValue, float MaxValue, float Percent)
+{
+	if (ManaBar)
+	{
+		ManaBar->SetPercent(Percent);
 	}
 
 	if (ManaText)
 	{
 		ManaText->SetText(FText::FromString(
-			FString::Printf(
-				TEXT("MP %.0f / %.0f"),
-				CachedPlayerCharacter->GetCurrentMana(),
-				CachedPlayerCharacter->GetMaxMana()
-			)
+			FString::Printf(TEXT("MP %.0f / %.0f"), CurrentValue, MaxValue)
 		));
 	}
+}
+
+void UPlayerHUDWidget::HandleHealthChanged(float CurrentValue, float MaxValue, float Percent)
+{
+	UpdateHealthUI(CurrentValue, MaxValue, Percent);
+}
+
+void UPlayerHUDWidget::HandleManaChanged(float CurrentValue, float MaxValue, float Percent)
+{
+	UpdateManaUI(CurrentValue, MaxValue, Percent);
 }

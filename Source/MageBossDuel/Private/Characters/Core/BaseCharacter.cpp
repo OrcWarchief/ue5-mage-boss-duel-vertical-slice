@@ -86,6 +86,9 @@ void ABaseCharacter::InitializeStats_Implementation()
 	{
 		MoveComp->MaxWalkSpeed = WalkSpeed;
 	}
+
+	BroadcastHealthChanged();
+	BroadcastManaChanged();
 }
 
 void ABaseCharacter::SetHealth(float NewHealth)
@@ -94,6 +97,8 @@ void ABaseCharacter::SetHealth(float NewHealth)
 
 	const float ClampedHealth = FMath::Clamp(NewHealth, 0.f, MaxHealth);
 	CurrentHealth = ClampedHealth;
+
+	BroadcastHealthChanged();
 	
 	if (CurrentHealth <= 0.f)
 	{
@@ -628,7 +633,21 @@ bool ABaseCharacter::TryConsumeMana(float Cost)
 	}
 
 	CurrentMana = FMath::Clamp(CurrentMana - Cost, 0.f, MaxMana);
+	BroadcastManaChanged();
+
 	return true;
+}
+
+void ABaseCharacter::BroadcastHealthChanged()
+{
+	const float Percent = MaxHealth > 0.f ? CurrentHealth / MaxHealth : 0.f;
+	OnHealthChanged.Broadcast(CurrentHealth, MaxHealth, Percent);
+}
+
+void ABaseCharacter::BroadcastManaChanged()
+{
+	const float Percent = MaxMana > 0.f ? CurrentMana / MaxMana : 0.f;
+	OnManaChanged.Broadcast(CurrentMana, MaxMana, Percent);
 }
 
 bool ABaseCharacter::CanStartDodge() const

@@ -3,6 +3,7 @@
 
 #include "PlayerController/MBDPlayerController.h"
 #include "UI/HUD/PlayerHUDWidget.h"
+#include "Characters/Core/BaseCharacter.h"
 
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -29,6 +30,11 @@ void AMBDPlayerController::BeginPlay()
             if (PlayerHUDWidget)
             {
                 PlayerHUDWidget->AddToViewport();
+
+                if (ABaseCharacter* BaseCharacter = Cast<ABaseCharacter>(GetPawn()))
+                {
+                    PlayerHUDWidget->InitializeFromCharacter(BaseCharacter);
+                }
             }
         }
     }
