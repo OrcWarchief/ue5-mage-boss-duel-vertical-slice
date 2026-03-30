@@ -224,7 +224,7 @@ void APlayerCharacter::UpdateLockOn(float DeltaTime)
 
 	if (GEngine)
 	{
-		DrawDebugLine(GetWorld(), ViewLoc, AimLoc, FColor::Green, false, 0.f, 0, 2.f);
+		DrawDebugLine(GetWorld(), ViewLoc, AimLoc, FColor::Green, false, 0.f, 0, 0.2f);
 	}
 }
 

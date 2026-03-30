@@ -124,6 +124,15 @@ public:
     UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Targeting")
     AActor* GetLockOnTargetActor() const;
 
+    UFUNCTION(BlueprintPure, Category = "Targeting")
+    FVector GetLockOnWorldLocation() const;
+
+    UFUNCTION(BlueprintPure, Category = "HUD|Target")
+    bool UsesBossTargetHUD() const { return bUseBossTargetHUD; }
+
+    UFUNCTION(BlueprintPure, Category = "HUD|Target")
+    FText GetTargetDisplayName() const { return TargetDisplayName; }
+
     // ===== Hit =====
     UFUNCTION(BlueprintPure, Category = "Combat|Hit")
     bool CanBeInterrupted() const;
@@ -151,6 +160,16 @@ protected:
     /** 상태 전이(중앙집중). Dead는 되돌리지 않음. */
     UFUNCTION(BlueprintCallable, Category = "State", meta = (BlueprintProtected = "true"))
     void SetCharacterState(ECharacterState NewState);
+
+    // ===== Targeting =====
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Targeting")
+    TObjectPtr<USceneComponent> LockOnAnchor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD|Target") // TODO: change to EditDefaultOnly 
+    bool bUseBossTargetHUD = false;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Target")
+    FText TargetDisplayName;
 
     // ===== 상태 머신 연결용 hook =====
     virtual bool CanEnterDodgeFromCurrentState() const;

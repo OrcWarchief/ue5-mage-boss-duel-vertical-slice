@@ -6,6 +6,7 @@
 
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SceneComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Animation/AnimMontage.h"
 #include "Engine/World.h"
@@ -56,6 +57,10 @@ ABaseCharacter::ABaseCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
+
+	LockOnAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("LockOnAnchor"));
+	LockOnAnchor->SetupAttachment(GetRootComponent());
+	LockOnAnchor->SetRelativeLocation(FVector(0.f, 0.f, 80.f));
 
 	// 컨트롤러 yaw를 캐릭터가 따라가게
 	bUseControllerRotationYaw = true;
@@ -382,9 +387,13 @@ FVector ABaseCharacter::GetTargetAimLocation(const AActor* TargetActor) const
 {
 	if (!IsValid(TargetActor)) { return FVector::ZeroVector; }
 
+	if (const ABaseCharacter* BaseTarget = Cast<ABaseCharacter>(TargetActor))
+	{
+		return BaseTarget->GetLockOnWorldLocation();
+	}
+
 	FVector Origin, BoxExtent;
 	TargetActor->GetActorBounds(true, Origin, BoxExtent);
-	
 	return Origin;
 }
 
@@ -470,6 +479,18 @@ void ABaseCharacter::OnDeathFinished()
 {
 	// 데스 몽타주 종료시점에서 호출하는 용도 2초 후 destroy
 	SetLifeSpan(2.0f);
+}
+
+FVector ABaseCharacter::GetLockOnWorldLocation() const
+{
+	if (LockOnAnchor)
+	{
+		return LockOnAnchor->GetComponentLocation();
+	}
+
+	FVector Origin, BoxExtent;
+	GetActorBounds(true, Origin, BoxExtent);
+	return Origin;
 }
 
 AActor* ABaseCharacter::GetLockOnTargetActor_Implementation() const

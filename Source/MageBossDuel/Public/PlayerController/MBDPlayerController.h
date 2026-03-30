@@ -8,6 +8,7 @@
 
 class UInputMappingContext;
 class UPlayerHUDWidget;
+class UTargetHUDWidget;
 /**
  * 
  */
@@ -21,6 +22,9 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "UI")
     TSubclassOf<UPlayerHUDWidget> PlayerHUDWidgetClass;
 
+    UPROPERTY(EditDefaultsOnly, Category = "UI")
+    TSubclassOf<UTargetHUDWidget> TargetHUDWidgetClass;
+
 protected:
     virtual void BeginPlay() override;
 
@@ -28,6 +32,9 @@ protected:
 
     UPROPERTY()
     TObjectPtr<UPlayerHUDWidget> PlayerHUDWidget;
+
+    UPROPERTY()
+    TObjectPtr<UTargetHUDWidget> TargetHUDWidget;
 
 public:
     UPROPERTY(EditDefaultsOnly, Category = "Input|Mapping")
