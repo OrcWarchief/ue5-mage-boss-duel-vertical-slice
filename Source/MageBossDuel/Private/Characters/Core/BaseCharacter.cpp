@@ -62,6 +62,10 @@ ABaseCharacter::ABaseCharacter()
 	LockOnAnchor->SetupAttachment(GetRootComponent());
 	LockOnAnchor->SetRelativeLocation(FVector(0.f, 0.f, 80.f));
 
+	TargetHealthBarAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("TargetHealthBarAnchor"));
+	TargetHealthBarAnchor->SetupAttachment(GetRootComponent());
+	TargetHealthBarAnchor->SetRelativeLocation(FVector(0.f, 0.f, 120.f));
+
 	// 컨트롤러 yaw를 캐릭터가 따라가게
 	bUseControllerRotationYaw = true;
 	// 이동 방향으로 자동 회전 끔
@@ -491,6 +495,17 @@ FVector ABaseCharacter::GetLockOnWorldLocation() const
 	FVector Origin, BoxExtent;
 	GetActorBounds(true, Origin, BoxExtent);
 	return Origin;
+}
+
+FVector ABaseCharacter::GetTargetHealthBarWorldLocation() const
+{
+	if (TargetHealthBarAnchor)
+	{
+		return TargetHealthBarAnchor->GetComponentLocation();
+	}
+	FVector Origin, BoxExtent;
+	GetActorBounds(true, Origin, BoxExtent);
+	return Origin + FVector(0.f, 0.f, BoxExtent.Z + 20.f);
 }
 
 AActor* ABaseCharacter::GetLockOnTargetActor_Implementation() const

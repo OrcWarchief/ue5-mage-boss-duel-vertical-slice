@@ -43,6 +43,9 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UProgressBar> BossHealthBar;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|NormalTarget")
+	FVector2D NormalTargetBarScreenOffset = FVector2D(0.f, -6.f);
+
 private:
 	UPROPERTY()
 	TObjectPtr<ABaseCharacter> CachedPlayerCharacter;
@@ -50,6 +53,9 @@ private:
 	void CachePlayerCharacter();
 	void HideAllTargetUI();
 	void UpdateTargetUI();
+
+	bool ProjectWorldToWidget(const FVector& WorldLocation, FVector2D& OutWidgetPosition) const;
 	void UpdateLockOnMarker(const FVector& WorldLocation);
+	void UpdateNormalTargetBarPosition(ABaseCharacter* TargetCharacter);
 	void UpdateHealthWidgets(ABaseCharacter* TargetCharacter);
 };

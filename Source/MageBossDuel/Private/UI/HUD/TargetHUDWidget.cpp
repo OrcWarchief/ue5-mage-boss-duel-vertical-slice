@@ -21,6 +21,24 @@ void UTargetHUDWidget::NativeConstruct()
 	Super::NativeConstruct();
 
 	CachePlayerCharacter();
+
+	if (LockOnMarker)
+	{
+		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(LockOnMarker->Slot))
+		{
+			CanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 0.f));
+			CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		}
+	}
+	if (NormalTargetBarBox)
+	{
+		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(NormalTargetBarBox->Slot))
+		{
+			CanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 0.f));
+			CanvasSlot->SetAlignment(FVector2D(0.5f, 1.0f));
+		}
+	}
+
 	HideAllTargetUI();
 }
 
@@ -81,6 +99,26 @@ void UTargetHUDWidget::UpdateTargetUI()
 
 	UpdateLockOnMarker(TargetCharacter->GetLockOnWorldLocation());
 	UpdateHealthWidgets(TargetCharacter);
+
+	if (!TargetCharacter->UsesBossTargetHUD())
+	{
+		UpdateNormalTargetBarPosition(TargetCharacter);
+	}
+}
+
+bool UTargetHUDWidget::ProjectWorldToWidget(const FVector& WorldLocation, FVector2D& OutWidgetPosition) const
+{
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC)
+	{
+		return false;
+	}
+	return UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(
+		PC,
+		WorldLocation,
+		OutWidgetPosition,
+		true
+	);
 }
 
 void UTargetHUDWidget::UpdateLockOnMarker(const FVector& WorldLocation)
@@ -90,26 +128,13 @@ void UTargetHUDWidget::UpdateLockOnMarker(const FVector& WorldLocation)
 		return;
 	}
 
-	APlayerController* PC = GetOwningPlayer();
-	if (!PC)
-	{
-		LockOnMarker->SetVisibility(ESlateVisibility::Collapsed);
-		return;
-	}
-
-	FVector2D WidgetPosition;
-	const bool bProjected = UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(
-		PC,
-		WorldLocation,
-		WidgetPosition,
-		true
-	);
-
-	if (!bProjected)
-	{
-		LockOnMarker->SetVisibility(ESlateVisibility::Collapsed);
-		return;
-	}
+	FVector2D WidgetPosition = FVector2D::ZeroVector; 
+	
+	if (!ProjectWorldToWidget(WorldLocation, WidgetPosition)) 
+	{ 
+		LockOnMarker->SetVisibility(ESlateVisibility::Collapsed); 
+		return; 
+	} 
 
 	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(LockOnMarker->Slot))
 	{
@@ -117,6 +142,28 @@ void UTargetHUDWidget::UpdateLockOnMarker(const FVector& WorldLocation)
 	}
 
 	LockOnMarker->SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+void UTargetHUDWidget::UpdateNormalTargetBarPosition(ABaseCharacter* TargetCharacter)
+{
+	if (!NormalTargetBarBox || !IsValid(TargetCharacter))
+	{
+		return;
+	}
+
+	FVector2D WidgetPosition = FVector2D::ZeroVector;
+	if (!ProjectWorldToWidget(TargetCharacter->GetTargetHealthBarWorldLocation(), WidgetPosition))
+	{
+		NormalTargetBarBox->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+
+	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(NormalTargetBarBox->Slot))
+	{
+		CanvasSlot->SetPosition(WidgetPosition + NormalTargetBarScreenOffset);
+	}
+
+	NormalTargetBarBox->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
 void UTargetHUDWidget::UpdateHealthWidgets(ABaseCharacter* TargetCharacter)

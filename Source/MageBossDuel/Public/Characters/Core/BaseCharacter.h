@@ -124,8 +124,11 @@ public:
     UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Targeting")
     AActor* GetLockOnTargetActor() const;
 
-    UFUNCTION(BlueprintPure, Category = "Targeting")
+    UFUNCTION(BlueprintPure, Category = "HUD|Targeting")
     FVector GetLockOnWorldLocation() const;
+
+    UFUNCTION(BlueprintPure, Category = "HUD|Targeting")
+    FVector GetTargetHealthBarWorldLocation() const;
 
     UFUNCTION(BlueprintPure, Category = "HUD|Target")
     bool UsesBossTargetHUD() const { return bUseBossTargetHUD; }
@@ -165,7 +168,10 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Targeting")
     TObjectPtr<USceneComponent> LockOnAnchor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD|Target") // TODO: change to EditDefaultOnly 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HUD|Target")
+    TObjectPtr<USceneComponent> TargetHealthBarAnchor;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Target")
     bool bUseBossTargetHUD = false;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Target")
