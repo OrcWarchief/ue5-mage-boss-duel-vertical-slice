@@ -73,8 +73,14 @@ void UTargetHUDWidget::HideAllTargetUI()
 
 	if (BossBarBox)
 	{
+		BossNameText->SetText(FText::GetEmpty());
 		BossBarBox->SetVisibility(ESlateVisibility::Collapsed);
 	}
+
+	CachedBossTarget = nullptr;
+	BossLagDisplayedPercent = 1.f;
+	LastBossActualPercent = 1.f;
+	BossLagDelayRemaining = 0.f;
 }
 
 void UTargetHUDWidget::UpdateTargetUI()
@@ -194,6 +200,8 @@ void UTargetHUDWidget::UpdateHealthWidgets(ABaseCharacter* TargetCharacter)
 			BossHealthBar->SetPercent(HealthPercent);
 		}
 
+		UpdateBossLagBar(TargetCharacter, HealthPercent);
+
 		if (BossNameText)
 		{
 			const FText DisplayName = TargetCharacter->GetTargetDisplayName().IsEmpty()
@@ -205,6 +213,11 @@ void UTargetHUDWidget::UpdateHealthWidgets(ABaseCharacter* TargetCharacter)
 	}
 	else
 	{
+		CachedBossTarget = nullptr;
+		BossLagDisplayedPercent = 1.f;
+		LastBossActualPercent = 1.f;
+		BossLagDelayRemaining = 0.f;
+
 		if (BossBarBox)
 		{
 			BossBarBox->SetVisibility(ESlateVisibility::Collapsed);
@@ -220,4 +233,71 @@ void UTargetHUDWidget::UpdateHealthWidgets(ABaseCharacter* TargetCharacter)
 			NormalTargetHealthBar->SetPercent(HealthPercent);
 		}
 	}
+}
+
+void UTargetHUDWidget::ResetBossLagBar(ABaseCharacter* BossCharacter, float CurrentHealthPercent)
+{
+	CachedBossTarget = BossCharacter;
+	BossLagDisplayedPercent = CurrentHealthPercent;
+	LastBossActualPercent = CurrentHealthPercent;
+	BossLagDelayRemaining = 0.f;
+
+	if (BossHealthLagBar)
+	{
+		BossHealthLagBar->SetPercent(CurrentHealthPercent);
+	}
+}
+
+void UTargetHUDWidget::UpdateBossLagBar(ABaseCharacter* BossCharacter, float CurrentHealthPercent)
+{
+	if (!BossHealthLagBar || !IsValid(BossCharacter))
+	{
+		return;
+	}
+
+	if (CachedBossTarget != BossCharacter)
+	{
+		ResetBossLagBar(BossCharacter, CurrentHealthPercent);
+		return;
+	}
+
+	const float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
+
+	const bool bJustTookDamage = CurrentHealthPercent < LastBossActualPercent - KINDA_SMALL_NUMBER;
+	const bool bJustHealed = CurrentHealthPercent > LastBossActualPercent + KINDA_SMALL_NUMBER;
+
+	if (bJustHealed)
+	{
+		BossLagDisplayedPercent = CurrentHealthPercent;
+		BossLagDelayRemaining = 0.f;
+	}
+	else
+	{
+		if (bJustTookDamage)
+		{
+			BossLagDelayRemaining = BossLagBarStartDelay;
+		}
+
+		if (BossLagDelayRemaining > 0.f)
+		{
+			BossLagDelayRemaining = FMath::Max(0.f, BossLagDelayRemaining - DeltaTime);
+		}
+		else if (BossLagDisplayedPercent > CurrentHealthPercent)
+		{
+			BossLagDisplayedPercent = FMath::FInterpTo(
+				BossLagDisplayedPercent,
+				CurrentHealthPercent,
+				DeltaTime,
+				BossLagBarInterpSpeed
+			);
+
+			if (FMath::IsNearlyEqual(BossLagDisplayedPercent, CurrentHealthPercent, 0.001f))
+			{
+				BossLagDisplayedPercent = CurrentHealthPercent;
+			}
+		}
+	}
+
+	LastBossActualPercent = CurrentHealthPercent;
+	BossHealthLagBar->SetPercent(BossLagDisplayedPercent);
 }

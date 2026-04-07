@@ -43,6 +43,15 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UProgressBar> BossHealthBar;
 
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UProgressBar> BossHealthLagBar;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Boss")
+	float BossLagBarStartDelay = 0.08f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Boss")
+	float BossLagBarInterpSpeed = 4.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|NormalTarget")
 	FVector2D NormalTargetBarScreenOffset = FVector2D(0.f, -6.f);
 
@@ -50,12 +59,23 @@ private:
 	UPROPERTY()
 	TObjectPtr<ABaseCharacter> CachedPlayerCharacter;
 
+	UPROPERTY()
+	TObjectPtr<ABaseCharacter> CachedBossTarget;
+	// ===== Boss Lag Bar =====
+	float BossLagDisplayedPercent = 1.f;
+	float LastBossActualPercent = 1.f;
+	float BossLagDelayRemaining = 0.f;
+
+	// ===== Target UI =====
 	void CachePlayerCharacter();
 	void HideAllTargetUI();
 	void UpdateTargetUI();
-
+	// ===== Widget Position =====
 	bool ProjectWorldToWidget(const FVector& WorldLocation, FVector2D& OutWidgetPosition) const;
 	void UpdateLockOnMarker(const FVector& WorldLocation);
 	void UpdateNormalTargetBarPosition(ABaseCharacter* TargetCharacter);
 	void UpdateHealthWidgets(ABaseCharacter* TargetCharacter);
+	// ===== Boss Lag Bar =====
+	void ResetBossLagBar(ABaseCharacter* BossCharacter, float CurrentHealthPercent);
+	void UpdateBossLagBar(ABaseCharacter* BossCharacter, float CurrentHealthPercent);
 };
