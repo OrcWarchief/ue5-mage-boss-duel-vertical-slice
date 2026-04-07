@@ -206,11 +206,19 @@ void ABaseCharacter::StartBasicAttack()
 		LastAttackTime = World->GetTimeSeconds();
 	}
 
-	// (BP에서 구현)애님 몽타주 재생 -> 애님노티파이에서 PerformBasicAttackHitCheck() -> EndBasicAttack() 호출
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	if (AnimInstance && BasicAttackMontage)
 	{
-		AnimInstance->Montage_Play(BasicAttackMontage);
+		const float PlayedLength = AnimInstance->Montage_Play(BasicAttackMontage, 1.0f);
+		if (PlayedLength <= 0.f)
+		{
+			EndBasicAttack();
+			return;
+		}
+
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindUObject(this, &ThisClass::OnBasicAttackMontageEnded);
+		AnimInstance->Montage_SetEndDelegate(EndDelegate, BasicAttackMontage);
 	}
 	else
 	{
@@ -218,6 +226,11 @@ void ABaseCharacter::StartBasicAttack()
 		PerformBasicAttackHitCheck();
 		EndBasicAttack();
 	}
+}
+
+void ABaseCharacter::OnBasicAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	EndBasicAttack();
 }
 
 void ABaseCharacter::PerformBasicAttackHitCheck_Implementation()
@@ -241,6 +254,8 @@ void ABaseCharacter::PerformBasicAttackHitCheck_Implementation()
 
 void ABaseCharacter::EndBasicAttack()
 {
+	UE_LOG(LogTemp, Warning, TEXT("End Basic Attack"));
+
 	if (!bIsAttacking)
 	{
 		return;

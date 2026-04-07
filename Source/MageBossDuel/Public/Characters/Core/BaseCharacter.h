@@ -108,6 +108,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Combat|Basic")
     void StartBasicAttack();
 
+    UFUNCTION()
+    void OnBasicAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
     /** AnimNotify 타이밍에서 호출 */
     UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Combat|Basic")
     void PerformBasicAttackHitCheck();
