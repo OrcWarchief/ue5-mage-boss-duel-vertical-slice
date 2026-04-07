@@ -2,6 +2,10 @@
 
 
 #include "PlayerController/MBDPlayerController.h"
+#include "UI/HUD/PlayerHUDWidget.h"
+#include "UI/HUD/TargetHUDWidget.h"
+#include "Characters/Core/BaseCharacter.h"
+
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 
@@ -20,6 +24,34 @@ void AMBDPlayerController::BeginPlay()
 
         FInputModeGameOnly Mode;
         SetInputMode(Mode);
+
+        if (PlayerHUDWidgetClass)
+        {
+            PlayerHUDWidget = CreateWidget<UPlayerHUDWidget>(this, PlayerHUDWidgetClass);
+            if (PlayerHUDWidget)
+            {
+                PlayerHUDWidget->AddToViewport();
+
+                if (ABaseCharacter* BaseCharacter = Cast<ABaseCharacter>(GetPawn()))
+                {
+                    PlayerHUDWidget->InitializeFromCharacter(BaseCharacter);
+                }
+            }
+        }
+
+        if (TargetHUDWidgetClass)
+        {
+            TargetHUDWidget = CreateWidget<UTargetHUDWidget>(this, TargetHUDWidgetClass);
+            if (TargetHUDWidget)
+            {
+                TargetHUDWidget->AddToViewport(10);
+
+                if (ABaseCharacter* PlayerCharacter = Cast<ABaseCharacter>(GetPawn()))
+                {
+                    TargetHUDWidget->InitializeFromPlayerCharacter(PlayerCharacter);
+                }
+            }
+        }
     }
 }
 

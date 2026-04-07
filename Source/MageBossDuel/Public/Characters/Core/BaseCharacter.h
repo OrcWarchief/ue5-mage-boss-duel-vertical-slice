@@ -25,7 +25,7 @@ enum class ECharacterState : uint8
     Dead      UMETA(DisplayName = "Dead"),
 };
 
-/** 4방향으로 닷지 None일 경우 백스텝  */
+/** 8방향으로 닷지 */
 UENUM(BlueprintType)
 enum class EDodgeDirection : uint8
 {
@@ -39,6 +39,13 @@ enum class EDodgeDirection : uint8
     BackwardLeft = 7,
     BackwardRight = 8
 };
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+    FOnCharacterStatChanged,
+    float, CurrentValue,
+    float, MaxValue,
+    float, Percent
+);
 
 /**
  * 플레이어/보스 공용 베이스.
@@ -69,12 +76,40 @@ public:
     UFUNCTION(BlueprintPure, Category = "Stats|Health")
     bool IsAlive() const;
 
+    UFUNCTION(BlueprintPure, Category = "Stats|Health")
+    float GetCurrentHealth() const { return CurrentHealth; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Health")
+    float GetMaxHealth() const { return MaxHealth; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Health")
+    float GetHealthPercent() const { return MaxHealth > 0.f ? CurrentHealth / MaxHealth : 0.f; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Mana")
+    float GetCurrentMana() const { return CurrentMana; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Mana")
+    float GetMaxMana() const { return MaxMana; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Mana")
+    float GetManaPercent() const { return MaxMana > 0.f ? CurrentMana / MaxMana : 0.f; }
+
+    // ===== HUD / UI =====
+    UPROPERTY(BlueprintAssignable, Category = "UI|Events")
+    FOnCharacterStatChanged OnHealthChanged;
+    
+    UPROPERTY(BlueprintAssignable, Category = "UI|Events")
+    FOnCharacterStatChanged OnManaChanged;
+
     // ===== Combat =====
     UFUNCTION(BlueprintPure, Category = "Combat|Basic")
     bool CanBasicAttack() const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat|Basic")
     void StartBasicAttack();
+
+    UFUNCTION()
+    void OnBasicAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
     /** AnimNotify 타이밍에서 호출 */
     UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Combat|Basic")
@@ -91,6 +126,18 @@ public:
     /** Hard Lock-on 타겟: 파생 클래스(Player)에서 락온 시스템이 있으면 override로 넘겨주기 */
     UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Targeting")
     AActor* GetLockOnTargetActor() const;
+
+    UFUNCTION(BlueprintPure, Category = "HUD|Targeting")
+    FVector GetLockOnWorldLocation() const;
+
+    UFUNCTION(BlueprintPure, Category = "HUD|Targeting")
+    FVector GetTargetHealthBarWorldLocation() const;
+
+    UFUNCTION(BlueprintPure, Category = "HUD|Target")
+    bool UsesBossTargetHUD() const { return bUseBossTargetHUD; }
+
+    UFUNCTION(BlueprintPure, Category = "HUD|Target")
+    FText GetTargetDisplayName() const { return TargetDisplayName; }
 
     // ===== Hit =====
     UFUNCTION(BlueprintPure, Category = "Combat|Hit")
@@ -119,6 +166,19 @@ protected:
     /** 상태 전이(중앙집중). Dead는 되돌리지 않음. */
     UFUNCTION(BlueprintCallable, Category = "State", meta = (BlueprintProtected = "true"))
     void SetCharacterState(ECharacterState NewState);
+
+    // ===== Targeting =====
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Targeting")
+    TObjectPtr<USceneComponent> LockOnAnchor;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HUD|Target")
+    TObjectPtr<USceneComponent> TargetHealthBarAnchor;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Target")
+    bool bUseBossTargetHUD = false;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Target")
+    FText TargetDisplayName;
 
     // ===== 상태 머신 연결용 hook =====
     virtual bool CanEnterDodgeFromCurrentState() const;
@@ -159,6 +219,8 @@ protected:
     // ===== Mana Helpers =====
     bool HasEnoughMana(float Cost) const;
     bool TryConsumeMana(float Cost);
+    void BroadcastHealthChanged();
+    void BroadcastManaChanged();
 
     // ===== Dodge =====
     /** 입력시 Forward Roll 몽타주 무입력시 Backstep 몽타주 */

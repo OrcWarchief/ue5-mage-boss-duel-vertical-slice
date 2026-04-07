@@ -6,6 +6,7 @@
 
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SceneComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Animation/AnimMontage.h"
 #include "Engine/World.h"
@@ -57,6 +58,14 @@ ABaseCharacter::ABaseCharacter()
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
 
+	LockOnAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("LockOnAnchor"));
+	LockOnAnchor->SetupAttachment(GetRootComponent());
+	LockOnAnchor->SetRelativeLocation(FVector(0.f, 0.f, 80.f));
+
+	TargetHealthBarAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("TargetHealthBarAnchor"));
+	TargetHealthBarAnchor->SetupAttachment(GetRootComponent());
+	TargetHealthBarAnchor->SetRelativeLocation(FVector(0.f, 0.f, 120.f));
+
 	// 컨트롤러 yaw를 캐릭터가 따라가게
 	bUseControllerRotationYaw = true;
 	// 이동 방향으로 자동 회전 끔
@@ -86,6 +95,9 @@ void ABaseCharacter::InitializeStats_Implementation()
 	{
 		MoveComp->MaxWalkSpeed = WalkSpeed;
 	}
+
+	BroadcastHealthChanged();
+	BroadcastManaChanged();
 }
 
 void ABaseCharacter::SetHealth(float NewHealth)
@@ -94,6 +106,8 @@ void ABaseCharacter::SetHealth(float NewHealth)
 
 	const float ClampedHealth = FMath::Clamp(NewHealth, 0.f, MaxHealth);
 	CurrentHealth = ClampedHealth;
+
+	BroadcastHealthChanged();
 	
 	if (CurrentHealth <= 0.f)
 	{
@@ -178,6 +192,7 @@ bool ABaseCharacter::CanBasicAttack() const
 
 void ABaseCharacter::StartBasicAttack()
 {
+	UE_LOG(LogTemp, Warning, TEXT("StartBasicAttack"));
 	if (!CanBasicAttack())
 	{
 		return;
@@ -191,11 +206,19 @@ void ABaseCharacter::StartBasicAttack()
 		LastAttackTime = World->GetTimeSeconds();
 	}
 
-	// (BP에서 구현)애님 몽타주 재생 -> 애님노티파이에서 PerformBasicAttackHitCheck() -> EndBasicAttack() 호출
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	if (AnimInstance && BasicAttackMontage)
 	{
-		AnimInstance->Montage_Play(BasicAttackMontage);
+		const float PlayedLength = AnimInstance->Montage_Play(BasicAttackMontage, 1.0f);
+		if (PlayedLength <= 0.f)
+		{
+			EndBasicAttack();
+			return;
+		}
+
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindUObject(this, &ThisClass::OnBasicAttackMontageEnded);
+		AnimInstance->Montage_SetEndDelegate(EndDelegate, BasicAttackMontage);
 	}
 	else
 	{
@@ -203,6 +226,11 @@ void ABaseCharacter::StartBasicAttack()
 		PerformBasicAttackHitCheck();
 		EndBasicAttack();
 	}
+}
+
+void ABaseCharacter::OnBasicAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	EndBasicAttack();
 }
 
 void ABaseCharacter::PerformBasicAttackHitCheck_Implementation()
@@ -226,6 +254,8 @@ void ABaseCharacter::PerformBasicAttackHitCheck_Implementation()
 
 void ABaseCharacter::EndBasicAttack()
 {
+	UE_LOG(LogTemp, Warning, TEXT("End Basic Attack"));
+
 	if (!bIsAttacking)
 	{
 		return;
@@ -376,9 +406,13 @@ FVector ABaseCharacter::GetTargetAimLocation(const AActor* TargetActor) const
 {
 	if (!IsValid(TargetActor)) { return FVector::ZeroVector; }
 
+	if (const ABaseCharacter* BaseTarget = Cast<ABaseCharacter>(TargetActor))
+	{
+		return BaseTarget->GetLockOnWorldLocation();
+	}
+
 	FVector Origin, BoxExtent;
 	TargetActor->GetActorBounds(true, Origin, BoxExtent);
-	
 	return Origin;
 }
 
@@ -455,7 +489,7 @@ void ABaseCharacter::FireBasicAttackProjectile(AActor* TargetActor)
 
 	if (SpawnedProjectile)
 	{
-		// 프로젝타일 초기 세팅?
+		SpawnedProjectile->SetDamage(BaseAttackDamage);
 	}
 }
 
@@ -464,6 +498,29 @@ void ABaseCharacter::OnDeathFinished()
 {
 	// 데스 몽타주 종료시점에서 호출하는 용도 2초 후 destroy
 	SetLifeSpan(2.0f);
+}
+
+FVector ABaseCharacter::GetLockOnWorldLocation() const
+{
+	if (LockOnAnchor)
+	{
+		return LockOnAnchor->GetComponentLocation();
+	}
+
+	FVector Origin, BoxExtent;
+	GetActorBounds(true, Origin, BoxExtent);
+	return Origin;
+}
+
+FVector ABaseCharacter::GetTargetHealthBarWorldLocation() const
+{
+	if (TargetHealthBarAnchor)
+	{
+		return TargetHealthBarAnchor->GetComponentLocation();
+	}
+	FVector Origin, BoxExtent;
+	GetActorBounds(true, Origin, BoxExtent);
+	return Origin + FVector(0.f, 0.f, BoxExtent.Z + 20.f);
 }
 
 AActor* ABaseCharacter::GetLockOnTargetActor_Implementation() const
@@ -498,10 +555,6 @@ bool ABaseCharacter::TryStartDodge(const FVector2D& MoveInput)
 
 	if (!MontageToPlay)
 	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("[%s] Dodge montage is missing for direction %d"),
-			*GetName(),
-			static_cast<int32>(Direction));
 		return false;
 	}
 
@@ -631,7 +684,21 @@ bool ABaseCharacter::TryConsumeMana(float Cost)
 	}
 
 	CurrentMana = FMath::Clamp(CurrentMana - Cost, 0.f, MaxMana);
+	BroadcastManaChanged();
+
 	return true;
+}
+
+void ABaseCharacter::BroadcastHealthChanged()
+{
+	const float Percent = MaxHealth > 0.f ? CurrentHealth / MaxHealth : 0.f;
+	OnHealthChanged.Broadcast(CurrentHealth, MaxHealth, Percent);
+}
+
+void ABaseCharacter::BroadcastManaChanged()
+{
+	const float Percent = MaxMana > 0.f ? CurrentMana / MaxMana : 0.f;
+	OnManaChanged.Broadcast(CurrentMana, MaxMana, Percent);
 }
 
 bool ABaseCharacter::CanStartDodge() const
