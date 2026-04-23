@@ -7,6 +7,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/InputComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "EnhancedInputComponent.h"
 #include "Engine/Engine.h"
@@ -28,6 +29,13 @@ APlayerCharacter::APlayerCharacter()
 
 	bUseControllerRotationYaw = false;
 	GetCharacterMovement()->bOrientRotationToMovement = true;
+
+	StaffWeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StaffWeaponMesh"));
+	StaffWeaponMesh->SetupAttachment(GetMesh(), TEXT("palm_r_Socket"));
+	StaffWeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	StaffWeaponMesh->SetGenerateOverlapEvents(false);
+	StaffWeaponMesh->SetCanEverAffectNavigation(false);
+	StaffWeaponMesh->SetHiddenInGame(true);
 }
 
 void APlayerCharacter::Tick(float DeltaTime)
@@ -62,13 +70,99 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		EIC->BindAction(IA_TargetSwitchX, ETriggerEvent::Completed, this, &APlayerCharacter::OnTargetSwitchXReleased);
 		EIC->BindAction(IA_TargetSwitchX, ETriggerEvent::Canceled,  this, &APlayerCharacter::OnTargetSwitchXReleased);
 	}
+	if (ensure(IA_Equip))		EIC->BindAction(IA_Equip,		ETriggerEvent::Started, this, &APlayerCharacter::Equip);
 	if (ensure(IA_Dodge))		EIC->BindAction(IA_Dodge,		ETriggerEvent::Started, this, &APlayerCharacter::Dodge);
 	if (ensure(IA_BasicAttack))	EIC->BindAction(IA_BasicAttack, ETriggerEvent::Started, this, &APlayerCharacter::BasicAttack);
+}
+
+void APlayerCharacter::SetCombatMode(EPlayerCombatMode NewCombatMode)
+{
+	if (CombatMode == NewCombatMode) { return; }
+
+	CombatMode = NewCombatMode;
+
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("Player CombatMode changed: %d"),
+		static_cast<int32>(CombatMode)
+	);
+}
+
+void APlayerCharacter::SetStaffMode(bool bNewStaffMode)
+{
+	SetCombatMode(bNewStaffMode ? EPlayerCombatMode::Staff : EPlayerCombatMode::Normal);
+}
+
+bool APlayerCharacter::CanStartStaffEquip() const
+{
+	if (!IsAlive()) { return false; }
+
+	if (IsDodging() || IsStaffMode()) { return false; }
+
+	if (bStaffEquipInProgress) { return false; }
+
+	if (!StaffEquipMontage) { return false; }
+
+	return true;
+}
+
+void APlayerCharacter::StartStaffEquip()
+{
+	if (!CanStartStaffEquip()) { return; }
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		return;
+	}
+
+	bStaffEquipInProgress = true;
+	SetStaffWeaponVisible(true); 
+
+	const float PlayedLength = AnimInstance->Montage_Play(StaffEquipMontage.Get(), 1.0f);
+	if (PlayedLength <= 0.f)
+	{
+		bStaffEquipInProgress = false;
+		SetStaffWeaponVisible(false);
+		return;
+	}
+
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &APlayerCharacter::OnStaffEquipMontageEnded);
+	AnimInstance->Montage_SetEndDelegate(EndDelegate, StaffEquipMontage.Get());
+}
+
+void APlayerCharacter::SetStaffWeaponVisible(bool bVisible)
+{
+	if (!StaffWeaponMesh) { return; }
+
+	StaffWeaponMesh->SetHiddenInGame(!bVisible);
+}
+
+void APlayerCharacter::OnStaffEquipMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != StaffEquipMontage.Get())
+	{
+		return;
+	}
+
+	bStaffEquipInProgress = false;
+
+	if (bInterrupted)
+	{
+		SetStaffWeaponVisible(false);
+		SetStaffMode(false);
+		return;
+	}
+
+	SetStaffMode(true);
 }
 
 void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	SetStaffWeaponVisible(false);
 }
 
 void APlayerCharacter::Move(const FInputActionValue& Value)
@@ -140,6 +234,11 @@ void APlayerCharacter::Jump()
 	Super::Jump();
 }
 
+void APlayerCharacter::Equip(const FInputActionValue& Value)
+{
+	StartStaffEquip();
+}
+
 void APlayerCharacter::Dodge(const FInputActionValue& Value)
 {
 	TryStartDodge(MovementVector);
@@ -153,6 +252,41 @@ void APlayerCharacter::BasicAttack(const FInputActionValue& Value)
 AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const
 {
 	return (bLockOnActive && IsValid(LockOnTarget)) ? LockOnTarget : nullptr;
+}
+
+EDodgeDirection APlayerCharacter::ResolveDodgeDirection(const FVector2D& MoveInput, bool bHasDirectionalInput) const
+{
+	if (IsStaffMode() && !bHasDirectionalInput)
+	{
+		return EDodgeDirection::Backward;
+	}
+
+	return Super::ResolveDodgeDirection(MoveInput, bHasDirectionalInput);
+}
+
+UAnimMontage* APlayerCharacter::ResolveDodgeMontage(const FVector2D& MoveInput, EDodgeDirection Direction, bool bHasDirectionalInput) const
+{
+	if (IsStaffMode())
+	{
+		if (!bHasDirectionalInput && StaffDodgeNeutralBackstepMontage)
+		{
+			return StaffDodgeNeutralBackstepMontage.Get();
+		}
+
+		if (UAnimMontage* StaffMontage = GetStaffDodgeMontage(Direction))
+		{
+			return StaffMontage;
+		}
+
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("Missing Staff dodge montage. Direction=%d."),
+			static_cast<int32>(Direction)
+		);
+	}
+
+	return Super::ResolveDodgeMontage(MoveInput, Direction, bHasDirectionalInput);
 }
 
 void APlayerCharacter::StartLockOn(AActor* NewTarget)
@@ -446,4 +580,37 @@ AActor* APlayerCharacter::FindSwitchTarget(int32 DirectionSign) const
 	}
 
 	return BestTarget;
+}
+
+UAnimMontage* APlayerCharacter::GetStaffDodgeMontage(EDodgeDirection Direction) const
+{
+	switch (Direction)
+	{
+	case EDodgeDirection::Forward:
+		return StaffDodgeForwardRollMontage.Get();
+
+	case EDodgeDirection::Backward:
+		return StaffDodgeBackwardRollMontage.Get();
+
+	case EDodgeDirection::Left:
+		return StaffDodgeLeftMontage.Get();
+
+	case EDodgeDirection::Right:
+		return StaffDodgeRightMontage.Get();
+
+	case EDodgeDirection::ForwardLeft:
+		return StaffDodgeForwardLeftMontage.Get();
+
+	case EDodgeDirection::ForwardRight:
+		return StaffDodgeForwardRightMontage.Get();
+
+	case EDodgeDirection::BackwardLeft:
+		return StaffDodgeBackwardLeftMontage.Get();
+
+	case EDodgeDirection::BackwardRight:
+		return StaffDodgeBackwardRightMontage.Get();
+
+	default:
+		return nullptr;
+	}
 }
