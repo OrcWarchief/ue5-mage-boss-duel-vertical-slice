@@ -541,25 +541,19 @@ bool ABaseCharacter::TryStartDodge(const FVector2D& MoveInput)
 	if (!CanStartDodge()) { return false; }
 
 	const bool bHasDirectionalInput = HasMeaningfulMoveInput(MoveInput);
-	const EDodgeDirection Direction = SelectDodgeDirection(MoveInput);
+	const EDodgeDirection Direction = ResolveDodgeDirection(MoveInput, bHasDirectionalInput);
 
-	UAnimMontage* MontageToPlay = nullptr;
-	if (!bHasDirectionalInput && DodgeNeutralBackstepMontage)
-	{
-		MontageToPlay = DodgeNeutralBackstepMontage;
-	}
-	else
-	{
-		MontageToPlay = GetDodgeMontage(Direction);
-	}
-
+	UAnimMontage* MontageToPlay = ResolveDodgeMontage(
+		MoveInput,
+		Direction,
+		bHasDirectionalInput
+	);
 	if (!MontageToPlay)
 	{
 		return false;
 	}
 
 	BeginDodge(MontageToPlay, Direction);
-
 	return true;
 }
 
@@ -823,26 +817,45 @@ EDodgeDirection ABaseCharacter::SelectDodgeDirection(const FVector2D& MoveInput)
 	return SelectEightWayDirectionFromAxes(ForwardValue, RightValue);
 }
 
+EDodgeDirection ABaseCharacter::ResolveDodgeDirection(const FVector2D& MoveInput, bool bHasDirectionalInput) const
+{
+	(void)bHasDirectionalInput;
+
+	return SelectDodgeDirection(MoveInput);
+}
+
+UAnimMontage* ABaseCharacter::ResolveDodgeMontage(const FVector2D& MoveInput, EDodgeDirection Direction, bool bHasDirectionalInput) const
+{
+	(void)MoveInput;
+
+	if (!bHasDirectionalInput && DodgeNeutralBackstepMontage)
+	{
+		return DodgeNeutralBackstepMontage.Get();
+	}
+
+	return GetDodgeMontage(Direction);
+}
+
 UAnimMontage* ABaseCharacter::GetDodgeMontage(EDodgeDirection Direction) const
 {
 	switch (Direction)
 	{
 	case EDodgeDirection::Forward:
-		return DodgeForwardRollMontage;
+		return DodgeForwardRollMontage.Get();
 	case EDodgeDirection::Backward:
-		return DodgeBackwardRollMontage;
+		return DodgeBackwardRollMontage.Get();
 	case EDodgeDirection::Left:
-		return DodgeLeftMontage;
+		return DodgeLeftMontage.Get();
 	case EDodgeDirection::Right:
-		return DodgeRightMontage;
+		return DodgeRightMontage.Get();
 	case EDodgeDirection::ForwardLeft:
-		return DodgeForwardLeftMontage;
+		return DodgeForwardLeftMontage.Get();
 	case EDodgeDirection::ForwardRight:
-		return DodgeForwardRightMontage;
+		return DodgeForwardRightMontage.Get();
 	case EDodgeDirection::BackwardLeft:
-		return DodgeBackwardLeftMontage;
+		return DodgeBackwardLeftMontage.Get();
 	case EDodgeDirection::BackwardRight:
-		return DodgeBackwardRightMontage;
+		return DodgeBackwardRightMontage.Get();
 	default:
 		return nullptr;
 	}

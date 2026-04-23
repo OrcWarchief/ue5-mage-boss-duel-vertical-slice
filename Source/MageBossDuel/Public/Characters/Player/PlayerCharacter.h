@@ -13,6 +13,13 @@ class USpringArmComponent;
 class UCameraComponent;
 class UAnimMontage;
 
+UENUM(BlueprintType)
+enum class EPlayerCombatMode : uint8
+{
+	Normal UMETA(DisplayName = "Normal"),
+	Staff  UMETA(DisplayName = "Staff")
+};
+
 /**
  * 
  */
@@ -25,6 +32,28 @@ public:
 	APlayerCharacter();
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+
+	//===== Staff Mode =====
+	UFUNCTION(BlueprintCallable, Category = "Equipment|CombatMode")
+	void SetCombatMode(EPlayerCombatMode NewCombatMode);
+
+	UFUNCTION(BlueprintCallable, Category = "Equipment|Staff")
+	void SetStaffMode(bool bNewStaffMode);
+
+	UFUNCTION(BlueprintCallable, Category = "Equipment|Staff")
+	bool CanStartStaffEquip() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Equipment|Staff")
+	void StartStaffEquip();
+
+	UFUNCTION(BlueprintCallable, Category = "Equipment|Staff")
+	void SetStaffWeaponVisible(bool bVisible);
+
+	UFUNCTION(BlueprintPure, Category = "Equipment|CombatMode")
+	EPlayerCombatMode GetCombatMode() const { return CombatMode; }
+
+	UFUNCTION(BlueprintPure, Category = "Equipment|Staff")
+	bool IsStaffMode() const { return CombatMode == EPlayerCombatMode::Staff; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -43,6 +72,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_TargetSwitchX;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Equip;
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_Dodge;
@@ -57,6 +89,7 @@ protected:
 	void Look(const FInputActionValue& Value);
 	void ToggleLockOn(const FInputActionValue& Value);
 	virtual void Jump() override;
+	void Equip(const FInputActionValue& Value);
 	void Dodge(const FInputActionValue& Value);
 	void BasicAttack(const FInputActionValue& Value);
 
@@ -64,6 +97,18 @@ protected:
 
 	virtual bool IsLockOnActive() const override { return bLockOnActive; }
 	virtual AActor* GetCurrentLockOnTarget() const override { return LockOnTarget.Get(); }
+
+	virtual EDodgeDirection ResolveDodgeDirection(
+		const FVector2D& MoveInput,
+		bool bHasDirectionalInput
+	) const override;
+
+	virtual UAnimMontage* ResolveDodgeMontage(
+		const FVector2D& MoveInput,
+		EDodgeDirection Direction,
+		bool bHasDirectionalInput
+	) const override;
+
 private:
 	// Camera
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
@@ -125,4 +170,54 @@ private:
 
 	bool TrySwitchLockOnTarget(int32 DirectionSign);
 	AActor* FindSwitchTarget(int32 DirectionSign) const;
+
+	// ===== Combat Mode =====
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Equipment|Runtime", meta = (AllowPrivateAccess = "true"))
+	EPlayerCombatMode CombatMode = EPlayerCombatMode::Normal;
+
+	// ===== Staff Mode =====
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMeshComponent> StaffWeaponMesh = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Staff|Anim", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffEquipMontage = nullptr;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Equipment|Runtime", meta = (AllowPrivateAccess = "true"))
+	bool bStaffEquipInProgress = false;
+
+	UFUNCTION()
+	void OnStaffEquipMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+	// ===== Staff Dodge Anim =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dodge|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffDodgeForwardRollMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dodge|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffDodgeBackwardRollMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dodge|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffDodgeLeftMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dodge|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffDodgeRightMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dodge|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffDodgeForwardLeftMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dodge|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffDodgeForwardRightMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dodge|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffDodgeBackwardLeftMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dodge|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffDodgeBackwardRightMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dodge|Staff", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimMontage> StaffDodgeNeutralBackstepMontage = nullptr;
+
+	UAnimMontage* GetStaffDodgeMontage(EDodgeDirection Direction) const;
 };

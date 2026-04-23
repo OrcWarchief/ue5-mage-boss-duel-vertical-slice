@@ -275,6 +275,18 @@ protected:
 
     // 방향 선택
     EDodgeDirection SelectDodgeDirection(const FVector2D& MoveInput) const;
+    
+    // 방향 결정, 몽타주 hook Staff 모드 시 Staff 닷지 사용
+    virtual EDodgeDirection ResolveDodgeDirection(
+        const FVector2D& MoveInput,
+        bool bHasDirectionalInput
+    ) const;
+
+    virtual UAnimMontage* ResolveDodgeMontage(
+        const FVector2D& MoveInput,
+        EDodgeDirection Direction,
+        bool bHasDirectionalInput
+    ) const;
     UAnimMontage* GetDodgeMontage(EDodgeDirection Direction) const;
 
     // 실제로 구를 월드 방향
