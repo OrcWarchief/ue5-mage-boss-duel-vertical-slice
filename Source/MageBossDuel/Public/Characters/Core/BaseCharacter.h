@@ -11,6 +11,7 @@
 class ABaseMagicProjectile;
 class UAnimMontage;
 class USceneComponent;
+struct FTimerHandle;
 class AActor;   // 이 헤더는 AActor의 내부 구현에 의존하지 않음!
 
 /** 간단 상태 머신(게임플레이 게이트 용). Dead는 terminal로 */
@@ -117,6 +118,9 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Combat|Basic")
     void EndBasicAttack();
+
+    UFUNCTION()
+    void OnHitRecoveryTimerElapsed();
 
     // ===== LifeCycle =====
     UFUNCTION(BlueprintCallable, Category = "LifeCycle")
@@ -317,6 +321,12 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Basic|Casting", meta = (ClampMin = "0.0", UIMin = "0.0"))
     float BasicAttackManaCost = 5.f;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+    float HitRecoveryDuration = 0.35f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Debug")
+    bool bEnableCombatDebug = false;
+
     /** 기본 공격 쿨다운 (s). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Basic", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
     float AttackCooldown = 0.5f;
@@ -364,6 +374,9 @@ private:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Runtime", meta = (AllowPrivateAccess = "true"))
     bool bIsAttacking = false;
 
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Runtime", meta = (AllowPrivateAccess = "true"))
+    bool bHasPerformedBasicAttackHit = false;
+
     /** 마지막 공격 시각(초). AttackCooldown 계산에 사용. */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Runtime", meta = (AllowPrivateAccess = "true"))
     float LastAttackTime = -9999.f;
@@ -371,4 +384,6 @@ private:
     /** 현재 상태(상태 머신). */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
     ECharacterState CurrentState = ECharacterState::Idle;
+
+    FTimerHandle HitRecoveryTimerHandle;
 };

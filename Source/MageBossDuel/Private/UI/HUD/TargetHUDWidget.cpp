@@ -73,7 +73,10 @@ void UTargetHUDWidget::HideAllTargetUI()
 
 	if (BossBarBox)
 	{
-		BossNameText->SetText(FText::GetEmpty());
+		if (BossNameText)
+		{
+			BossNameText->SetText(FText::GetEmpty());
+		}
 		BossBarBox->SetVisibility(ESlateVisibility::Collapsed);
 	}
 

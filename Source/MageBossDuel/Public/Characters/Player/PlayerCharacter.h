@@ -94,6 +94,9 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "LockOn|Drive")
 	float LockOnInterpSpeed = 12.f;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Debug")
+	bool bEnableLockOnDebug = false;
+
 	void StartLockOn(AActor* NewTarget);
 	void StopLockOn();
 	void UpdateLockOn(float DeltaTime);

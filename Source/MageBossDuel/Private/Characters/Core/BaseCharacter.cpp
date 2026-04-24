@@ -12,6 +12,8 @@
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "Animation/AnimInstance.h"
+#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -87,6 +89,7 @@ void ABaseCharacter::InitializeStats_Implementation()
 
 	// 전투/상태 초기화
 	bIsAttacking = false;
+	bHasPerformedBasicAttackHit = false;
 	LastAttackTime = -9999.f;
 	SetCharacterState(ECharacterState::Idle);
 
@@ -175,6 +178,11 @@ bool ABaseCharacter::CanBasicAttack() const
 		return false;
 	}
 
+	if (CurrentState != ECharacterState::Idle && CurrentState != ECharacterState::Moving)
+	{
+		return false;
+	}
+
 	const UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -192,13 +200,17 @@ bool ABaseCharacter::CanBasicAttack() const
 
 void ABaseCharacter::StartBasicAttack()
 {
-	UE_LOG(LogTemp, Warning, TEXT("StartBasicAttack"));
+	if (bEnableCombatDebug)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StartBasicAttack"));
+	}
 	if (!CanBasicAttack())
 	{
 		return;
 	}
 
 	bIsAttacking = true;
+	bHasPerformedBasicAttackHit = false;
 	SetCharacterState(ECharacterState::Attacking);
 
 	if (UWorld* World = GetWorld())
@@ -240,7 +252,13 @@ void ABaseCharacter::PerformBasicAttackHitCheck_Implementation()
 		return;
 	}
 
-	// 마나 소모
+	if (bHasPerformedBasicAttackHit)
+	{
+		return;
+	}
+
+	bHasPerformedBasicAttackHit = true;
+
 	if (!TryConsumeMana(BasicAttackManaCost))
 	{
 		// 마나 부족이면 발사 없이 공격 취소
@@ -254,14 +272,17 @@ void ABaseCharacter::PerformBasicAttackHitCheck_Implementation()
 
 void ABaseCharacter::EndBasicAttack()
 {
-	UE_LOG(LogTemp, Warning, TEXT("End Basic Attack"));
+	if (bEnableCombatDebug)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("End Basic Attack"));
+	}
 
 	if (!bIsAttacking)
 	{
 		return;
 	}
 	bIsAttacking = false;
-
+	bHasPerformedBasicAttackHit = false;
 	// 상태 복귀: 속도 기반으로 Idle/Moving
 	const float Speed2D = GetVelocity().Size2D();
 	SetCharacterState(Speed2D > 3.f ? ECharacterState::Moving : ECharacterState::Idle);
@@ -322,8 +343,10 @@ AActor* ABaseCharacter::FindLockOnTarget(
 		QueryParams
 	);
 
-	// 디버그 
-	DrawDebugSphere(World, SearchCenter, MaxDistance, 24, FColor::Cyan, false, 1.0f, 0, 1.0f);
+	if (bEnableCombatDebug)
+	{
+		DrawDebugSphere(World, SearchCenter, MaxDistance, 24, FColor::Cyan, false, 1.0f, 0, 1.0f);
+	}
 
 	if (!bAny) { return nullptr; }
 
@@ -572,6 +595,11 @@ void ABaseCharacter::Die_Implementation()
 	
 	// 상태 정리
 	bIsAttacking = false;
+	bHasPerformedBasicAttackHit = false;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
+	}
 	SetCharacterState(ECharacterState::Dead);
 
 	// 이동 정지
@@ -599,6 +627,34 @@ void ABaseCharacter::OnHitReaction_Implementation()
 	}
 
 	SetCharacterState(ECharacterState::Hit);
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
+		if (HitRecoveryDuration <= 0.f)
+		{
+			OnHitRecoveryTimerElapsed();
+		}
+		else
+		{
+			World->GetTimerManager().SetTimer(HitRecoveryTimerHandle, this, &ThisClass::OnHitRecoveryTimerElapsed, HitRecoveryDuration, false);
+		}
+	}
+}
+
+void ABaseCharacter::OnHitRecoveryTimerElapsed()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (CurrentState != ECharacterState::Hit)
+	{
+		return;
+	}
+
+	SetCharacterState(GetVelocity().Size2D() > 3.f ? ECharacterState::Moving : ECharacterState::Idle);
 }
 
 void ABaseCharacter::SetCharacterState(ECharacterState NewState)
@@ -607,6 +663,14 @@ void ABaseCharacter::SetCharacterState(ECharacterState NewState)
 	if (CurrentState == ECharacterState::Dead)
 	{
 		return;
+	}
+
+	if (CurrentState == ECharacterState::Hit && NewState != ECharacterState::Hit)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
+		}
 	}
 	
 	CurrentState = NewState;
