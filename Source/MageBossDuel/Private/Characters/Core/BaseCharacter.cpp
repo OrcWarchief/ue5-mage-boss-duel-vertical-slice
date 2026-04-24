@@ -12,6 +12,8 @@
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "Animation/AnimInstance.h"
+#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -66,9 +68,10 @@ ABaseCharacter::ABaseCharacter()
 	TargetHealthBarAnchor->SetupAttachment(GetRootComponent());
 	TargetHealthBarAnchor->SetRelativeLocation(FVector(0.f, 0.f, 120.f));
 
-	// ÄÁÆ®·Ñ·¯ yaw¸¦ Ä³¸¯ÅÍ°¡ µû¶ó°¡°Ô
+	bHasPerformedBasicAttackHit = false;
+	// ì»¨íŠ¸ë¡¤ëŸ¬ yawë¥¼ ìºë¦­í„°ê°€ ë”°ë¼ê°€ê²Œ
 	bUseControllerRotationYaw = true;
-	// ÀÌµ¿ ¹æÇâÀ¸·Î ÀÚµ¿ È¸Àü ²û
+	// ì´ë™ ë°©í–¥ìœ¼ë¡œ ìë™ íšŒì „ ë”
 	GetCharacterMovement()->bOrientRotationToMovement = false; 
 }
 
@@ -81,16 +84,16 @@ void ABaseCharacter::BeginPlay()
 // ===== Stats =====
 void ABaseCharacter::InitializeStats_Implementation()
 {
-	// Health, Mana ÃÊ±âÈ­
+	// Health, Mana ì´ˆê¸°í™”
 	CurrentHealth = MaxHealth;
 	CurrentMana = MaxMana;
 
-	// ÀüÅõ/»óÅÂ ÃÊ±âÈ­
+	// ì „íˆ¬/ìƒíƒœ ì´ˆê¸°í™”
 	bIsAttacking = false;
 	LastAttackTime = -9999.f;
 	SetCharacterState(ECharacterState::Idle);
 
-	// ÀÌµ¿¼Óµµ ÃÊ±âÈ­
+	// ì´ë™ì†ë„ ì´ˆê¸°í™”
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		MoveComp->MaxWalkSpeed = WalkSpeed;
@@ -111,7 +114,7 @@ void ABaseCharacter::SetHealth(float NewHealth)
 	
 	if (CurrentHealth <= 0.f)
 	{
-		SetCharacterState(ECharacterState::Dead); // terminal º¸Àå
+		SetCharacterState(ECharacterState::Dead); // terminal ë³´ì¥
 	}
 }
 
@@ -127,11 +130,11 @@ void ABaseCharacter::ApplyDamage(float DamageAmount, ABaseCharacter* DamageCause
 		return;
 	}
 
-	// TODO : Defense/Poise µî Àû¿ë 
+	// TODO : Defense/Poise ë“± ì ìš© 
 	const float FinalDamage = DamageAmount;
 
 	const float NewHealth = CurrentHealth - FinalDamage;
-	SetHealth(NewHealth); // ³»ºÎ¿¡¼­ Clamp + Die Ã³¸®
+	SetHealth(NewHealth); // ë‚´ë¶€ì—ì„œ Clamp + Die ì²˜ë¦¬
 
 	if (IsAlive())
 	{
@@ -151,16 +154,32 @@ void ABaseCharacter::Heal(float HealAmount)
 		return;
 	}
 	const float NewHealth = CurrentHealth + HealAmount;
-	SetHealth(NewHealth); // ³»ºÎ¿¡¼­ Clamp Ã³¸®
+	if (CurrentState != ECharacterState::Idle && CurrentState != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	if (bEnableCombatDebug)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StartBasicAttack"));
+	}
+	bHasPerformedBasicAttackHit = false;
 }
 
-bool ABaseCharacter::IsAlive() const
-{
-	return CurrentState != ECharacterState::Dead;
-}
+	if (bHasPerformedBasicAttackHit)
+	{
+		return;
+	}
 
-// ===== Combat =====
-bool ABaseCharacter::CanBasicAttack() const
+	bHasPerformedBasicAttackHit = true;
+
+
+}
+	if (bEnableCombatDebug)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("End Basic Attack"));
+	}
+	bHasPerformedBasicAttackHit = false;
 {
 	if (!IsAlive()) 
 	{
@@ -222,7 +241,7 @@ void ABaseCharacter::StartBasicAttack()
 	}
 	else
 	{
-		// ¸ùÅ¸ÁÖ ¾øÀ¸¸é Áï½Ã ¹ß»ç ÈÄ Á¾·á
+		// ëª½íƒ€ì£¼ ì—†ìœ¼ë©´ ì¦‰ì‹œ ë°œì‚¬ í›„ ì¢…ë£Œ
 		PerformBasicAttackHitCheck();
 		EndBasicAttack();
 	}
@@ -240,14 +259,14 @@ void ABaseCharacter::PerformBasicAttackHitCheck_Implementation()
 		return;
 	}
 
-	// ¸¶³ª ¼Ò¸ğ
+	// ë§ˆë‚˜ ì†Œëª¨
 	if (!TryConsumeMana(BasicAttackManaCost))
 	{
-		// ¸¶³ª ºÎÁ·ÀÌ¸é ¹ß»ç ¾øÀÌ °ø°İ Ãë¼Ò
+		// ë§ˆë‚˜ ë¶€ì¡±ì´ë©´ ë°œì‚¬ ì—†ì´ ê³µê²© ì·¨ì†Œ
 		EndBasicAttack();
 		return;
 	}
-	// ÇÏµå ¶ô¿Â -> ¼ÒÇÁÆ® ¶ô¿Â -> nullptr
+	// í•˜ë“œ ë½ì˜¨ -> ì†Œí”„íŠ¸ ë½ì˜¨ -> nullptr
 	AActor* Target = ResolveBasicAttackTarget();
 	FireBasicAttackProjectile(Target);
 }
@@ -262,7 +281,7 @@ void ABaseCharacter::EndBasicAttack()
 	}
 	bIsAttacking = false;
 
-	// »óÅÂ º¹±Í: ¼Óµµ ±â¹İÀ¸·Î Idle/Moving
+	// ìƒíƒœ ë³µê·€: ì†ë„ ê¸°ë°˜ìœ¼ë¡œ Idle/Moving
 	const float Speed2D = GetVelocity().Size2D();
 	SetCharacterState(Speed2D > 3.f ? ECharacterState::Moving : ECharacterState::Idle);
 }
@@ -270,14 +289,14 @@ void ABaseCharacter::EndBasicAttack()
 // ===== Targeting (3-tier) =====
 AActor* ABaseCharacter::ResolveBasicAttackTarget() const
 {
-	// ÇÏµå ¶ô¿Â
+	// í•˜ë“œ ë½ì˜¨
 	AActor* HardTarget = GetLockOnTargetActor();
 	if (HardTarget && HardTarget != this)
 	{
 		return HardTarget;
 	}
 	
-	// ¼ÒÇÁÆ® ¶ô¿Â
+	// ì†Œí”„íŠ¸ ë½ì˜¨
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	GetControllerViewPoint(ViewLocation, ViewRotation);
@@ -288,7 +307,7 @@ AActor* ABaseCharacter::ResolveBasicAttackTarget() const
 		return SoftTarget;
 	}
 
-	// Å¸°Ù ¾øÀ½
+	// íƒ€ê²Ÿ ì—†ìŒ
 	return nullptr;
 }
 
@@ -322,7 +341,10 @@ AActor* ABaseCharacter::FindLockOnTarget(
 		QueryParams
 	);
 
-	// µğ¹ö±× 
+	if (bEnableCombatDebug)
+	{
+	}
+	// ë””ë²„ê·¸ 
 	DrawDebugSphere(World, SearchCenter, MaxDistance, 24, FColor::Cyan, false, 1.0f, 0, 1.0f);
 
 	if (!bAny) { return nullptr; }
@@ -351,10 +373,10 @@ AActor* ABaseCharacter::FindLockOnTarget(
 		const FVector Dir = ToCandidate / Dist;
 		const float Dot = FVector::DotProduct(ViewForward, Dir);
 
-		// Àü¹æ ÄÜ ¸ğ¾ç ÇÊÅÍ
+		// ì „ë°© ì½˜ ëª¨ì–‘ í•„í„°
 		if (Dot < CosThreshold) { continue; }
 
-		// LOS ÇÊÅÍ (º® µÚ µî ½Ã¾ß ¿¡¼­ ¾Èº¸ÀÌ´Â°Å Á¦¿Ü)
+		// LOS í•„í„° (ë²½ ë’¤ ë“± ì‹œì•¼ ì—ì„œ ì•ˆë³´ì´ëŠ”ê±° ì œì™¸)
 		if (bRequireLineOfSight)
 		{
 			FHitResult Hit;
@@ -374,7 +396,7 @@ AActor* ABaseCharacter::FindLockOnTarget(
 			}
 		}
 
-		// ½ºÄÚ¾î: Á¤¸é¿¡ °¡±î¿ï¼ö·Ï +, ¸Ö¼ö·Ï -
+		// ìŠ¤ì½”ì–´: ì •ë©´ì— ê°€ê¹Œìš¸ìˆ˜ë¡ +, ë©€ìˆ˜ë¡ -
 		const double Score = (double)Dot * 1000.0 - (double)Dist;
 
 		if (Score > BestScore)
@@ -445,22 +467,22 @@ void ABaseCharacter::FireBasicAttackProjectile(AActor* TargetActor)
 
 	USkeletalMeshComponent* MeshComp = GetMesh();	// ShooterMeshComp
 
-	// 1) ½ºÆù À§Ä¡ ¸ÓÁñ ¼ÒÄÏ ¿ì¼±
+	// 1) ìŠ¤í° ìœ„ì¹˜ ë¨¸ì¦ ì†Œì¼“ ìš°ì„ 
 	FVector SpawnLocation = GetActorLocation() + GetActorForwardVector() * 50.f + BasicAttackMuzzleOffset;
 
 	if (MeshComp && MeshComp->DoesSocketExist(BasicAttackMuzzleSocketName))
 	{
-		// TODO: ¸ÓÁñ ¼ÒÄÏ ÀÌ¸§ BasicAttackMuzzleSocketName Ãß°¡
+		// TODO: ë¨¸ì¦ ì†Œì¼“ ì´ë¦„ BasicAttackMuzzleSocketName ì¶”ê°€
 		const FTransform MuzzleTransform = MeshComp->GetSocketTransform(BasicAttackMuzzleSocketName, RTS_World);
 		SpawnLocation = MuzzleTransform.TransformPosition(BasicAttackMuzzleOffset);
 	}
 
-	// 2) ¿¡ÀÓ È¸Àü: (Hard/Soft) Å¸°ÙÀÌ ÀÖÀ¸¸é Å¸°Ù ¹æÇâ, ¾øÀ¸¸é Ä«¸Ş¶ó ¹æÇâ
+	// 2) ì—ì„ íšŒì „: (Hard/Soft) íƒ€ê²Ÿì´ ìˆìœ¼ë©´ íƒ€ê²Ÿ ë°©í–¥, ì—†ìœ¼ë©´ ì¹´ë©”ë¼ ë°©í–¥
 	FVector ViewLoc;
 	FRotator ViewRot;
 	GetControllerViewPoint(ViewLoc, ViewRot);
 
-	FRotator SpawnRotation = ViewRot; // Free Aim ±âº»
+	FRotator SpawnRotation = ViewRot; // Free Aim ê¸°ë³¸
 
 	if (IsValid(TargetActor))
 	{
@@ -478,7 +500,7 @@ void ABaseCharacter::FireBasicAttackProjectile(AActor* TargetActor)
 	SpawnParameters.Instigator = this;
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-	// ÇÁ·ÎÁ§Å¸ÀÏ À¯È¿ °Ë»ç ÈÄ ¹ß»ç
+	// í”„ë¡œì íƒ€ì¼ ìœ íš¨ ê²€ì‚¬ í›„ ë°œì‚¬
 	ABaseMagicProjectile* SpawnedProjectile =
 		World->SpawnActor<ABaseMagicProjectile>(
 			BasicAttackProjectileClass,
@@ -496,7 +518,7 @@ void ABaseCharacter::FireBasicAttackProjectile(AActor* TargetActor)
 // ===== LifeCycle / Hit =====
 void ABaseCharacter::OnDeathFinished()
 {
-	// µ¥½º ¸ùÅ¸ÁÖ Á¾·á½ÃÁ¡¿¡¼­ È£ÃâÇÏ´Â ¿ëµµ 2ÃÊ ÈÄ destroy
+	// ë°ìŠ¤ ëª½íƒ€ì£¼ ì¢…ë£Œì‹œì ì—ì„œ í˜¸ì¶œí•˜ëŠ” ìš©ë„ 2ì´ˆ í›„ destroy
 	SetLifeSpan(2.0f);
 }
 
@@ -525,14 +547,14 @@ FVector ABaseCharacter::GetTargetHealthBarWorldLocation() const
 
 AActor* ABaseCharacter::GetLockOnTargetActor_Implementation() const
 {
-	// ±âº»: ¶ô¿Â ½Ã½ºÅÛ ¾øÀ¸¸é nullptr
+	// ê¸°ë³¸: ë½ì˜¨ ì‹œìŠ¤í…œ ì—†ìœ¼ë©´ nullptr
 	return nullptr;
 }
 
 bool ABaseCharacter::CanBeInterrupted() const
 {
-	// ¾ÆÁÖ ´Ü¼ø ¹öÀü : °ø°İ ÁßÀÌ¸é ÀÎÅÍ·´Æ® °¡´É
-	// ½´ÆÛ¾Æ¸Ó, Poise  È®Àå?
+	// ì•„ì£¼ ë‹¨ìˆœ ë²„ì „ : ê³µê²© ì¤‘ì´ë©´ ì¸í„°ëŸ½íŠ¸ ê°€ëŠ¥
+	// ìŠˆí¼ì•„ë¨¸, Poise  í™•ì¥?
 	return IsAlive() && bIsAttacking;
 }
 
@@ -564,17 +586,57 @@ void ABaseCharacter::Die_Implementation()
 		return;
 	}
 	
-	// »óÅÂ Á¤¸®
+	bHasPerformedBasicAttackHit = false;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
+		if (HitRecoveryDuration <= 0.f)
+		{
+			OnHitRecoveryTimerElapsed();
+		}
+		else
+		{
+			World->GetTimerManager().SetTimer(HitRecoveryTimerHandle, this, &ThisClass::OnHitRecoveryTimerElapsed, HitRecoveryDuration, false);
+		}
+	}
+}
+
+void ABaseCharacter::OnHitRecoveryTimerElapsed()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (CurrentState != ECharacterState::Hit)
+	{
+		return;
+	}
+
+	SetCharacterState(GetVelocity().Size2D() > 3.f ? ECharacterState::Moving : ECharacterState::Idle);
+	if (CurrentState == ECharacterState::Hit && NewState != ECharacterState::Hit)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
+		}
+	}
+
 	bIsAttacking = false;
 	SetCharacterState(ECharacterState::Dead);
 
-	// ÀÌµ¿ Á¤Áö
+	// ì´ë™ ì •ì§€
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		MoveComp->DisableMovement();
 	}
 
-	// Äİ¸®Àü ºñÈ°¼ºÈ­
+	// ì½œë¦¬ì „ ë¹„í™œì„±í™”
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
 		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -588,7 +650,7 @@ void ABaseCharacter::OnHitReaction_Implementation()
 {
 	if (bIsAttacking && CanBeInterrupted())
 	{
-		// °ø°İ °­Á¦ Á¾·á
+		// ê³µê²© ê°•ì œ ì¢…ë£Œ
 		EndBasicAttack();
 	}
 
@@ -597,7 +659,7 @@ void ABaseCharacter::OnHitReaction_Implementation()
 
 void ABaseCharacter::SetCharacterState(ECharacterState NewState)
 {
-	// Á×À¸¸é ´Ù¸¥ »óÅÂ·Î ÀüÀÌ ºÒ°¡´É
+	// ì£½ìœ¼ë©´ ë‹¤ë¥¸ ìƒíƒœë¡œ ì „ì´ ë¶ˆê°€ëŠ¥
 	if (CurrentState == ECharacterState::Dead)
 	{
 		return;
@@ -605,7 +667,7 @@ void ABaseCharacter::SetCharacterState(ECharacterState NewState)
 	
 	CurrentState = NewState;
 
-	// »óÅÂ¿¡ µû¸¥ °øÅë Á¦¾î
+	// ìƒíƒœì— ë”°ë¥¸ ê³µí†µ ì œì–´
 	switch (CurrentState)
 	{
 	case ECharacterState::Idle:
@@ -616,7 +678,7 @@ void ABaseCharacter::SetCharacterState(ECharacterState NewState)
 		break;
 
 	case ECharacterState::Hit:
-		// TODO : ÇÇ°İ Áß °ø°İ ºÒ°¡ Ã³¸®
+		// TODO : í”¼ê²© ì¤‘ ê³µê²© ë¶ˆê°€ ì²˜ë¦¬
 		break;
 
 	case ECharacterState::Dead:

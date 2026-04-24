@@ -43,6 +43,14 @@ protected:
 		const FHitResult& SweepResult
 	);
 
+	UFUNCTION()
+	void OnProjectileHit(
+		UPrimitiveComponent* HitComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		FVector NormalImpulse,
+		const FHitResult& Hit
+	);
 
 public:	
 	// Called every frame

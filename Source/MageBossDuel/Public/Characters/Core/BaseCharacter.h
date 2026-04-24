@@ -11,9 +11,10 @@
 class ABaseMagicProjectile;
 class UAnimMontage;
 class USceneComponent;
-class AActor;   // ÀÌ Çì´õ´Â AActorÀÇ ³»ºÎ ±¸Çö¿¡ ÀÇÁ¸ÇÏÁö ¾ÊÀ½!
+struct FTimerHandle;
+class AActor;   // ì´ í—¤ë”ëŠ” AActorì˜ ë‚´ë¶€ êµ¬í˜„ì— ì˜ì¡´í•˜ì§€ ì•ŠìŒ!
 
-/** °£´Ü »óÅÂ ¸Ó½Å(°ÔÀÓÇÃ·¹ÀÌ °ÔÀÌÆ® ¿ë). Dead´Â terminal·Î */
+/** ê°„ë‹¨ ìƒíƒœ ë¨¸ì‹ (ê²Œì„í”Œë ˆì´ ê²Œì´íŠ¸ ìš©). DeadëŠ” terminalë¡œ */
 UENUM(BlueprintType)
 enum class ECharacterState : uint8
 {
@@ -25,7 +26,7 @@ enum class ECharacterState : uint8
     Dead      UMETA(DisplayName = "Dead"),
 };
 
-/** 8¹æÇâÀ¸·Î ´åÁö */
+/** 8ë°©í–¥ìœ¼ë¡œ ë‹·ì§€ */
 UENUM(BlueprintType)
 enum class EDodgeDirection : uint8
 {
@@ -48,12 +49,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 );
 
 /**
- * ÇÃ·¹ÀÌ¾î/º¸½º °ø¿ë º£ÀÌ½º.
- * - Health/Mana °ü¸®(Å¬·¥ÇÁ) + »ç¸Á Ã³¸®
- * - »óÅÂ ÀüÀÌ(Idle/Moving/Attacking/Hit/Dead)
- * - ±âº» °ø°İ Èå¸§:
+ * í”Œë ˆì´ì–´/ë³´ìŠ¤ ê³µìš© ë² ì´ìŠ¤.
+ * - Health/Mana ê´€ë¦¬(í´ë¨í”„) + ì‚¬ë§ ì²˜ë¦¬
+ * - ìƒíƒœ ì „ì´(Idle/Moving/Attacking/Hit/Dead)
+ * - ê¸°ë³¸ ê³µê²© íë¦„:
  *  Start -> (AnimNotify: PerformBasicAttackHitCheck) -> End
- *   * °¡±î¿ì¸é ±ÙÁ¢ È÷Æ®Ã¼Å©, ¸Ö¸é ÇÁ·ÎÁ§Å¸ÀÏ ¹ß»ç
+ *   * ê°€ê¹Œìš°ë©´ ê·¼ì ‘ íˆíŠ¸ì²´í¬, ë©€ë©´ í”„ë¡œì íƒ€ì¼ ë°œì‚¬
  */
 UCLASS()
 class MAGEBOSSDUEL_API ABaseCharacter : public ACharacter
@@ -111,7 +112,10 @@ public:
     UFUNCTION()
     void OnBasicAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
-    /** AnimNotify Å¸ÀÌ¹Ö¿¡¼­ È£Ãâ */
+    UFUNCTION()
+    void OnHitRecoveryTimerElapsed();
+
+    /** AnimNotify íƒ€ì´ë°ì—ì„œ í˜¸ì¶œ */
     UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Combat|Basic")
     void PerformBasicAttackHitCheck();
 
@@ -123,7 +127,7 @@ public:
     void OnDeathFinished();
 
     // ===== Targeting =====
-    /** Hard Lock-on Å¸°Ù: ÆÄ»ı Å¬·¡½º(Player)¿¡¼­ ¶ô¿Â ½Ã½ºÅÛÀÌ ÀÖÀ¸¸é override·Î ³Ñ°ÜÁÖ±â */
+    /** Hard Lock-on íƒ€ê²Ÿ: íŒŒìƒ í´ë˜ìŠ¤(Player)ì—ì„œ ë½ì˜¨ ì‹œìŠ¤í…œì´ ìˆìœ¼ë©´ overrideë¡œ ë„˜ê²¨ì£¼ê¸° */
     UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Targeting")
     AActor* GetLockOnTargetActor() const;
 
@@ -151,19 +155,19 @@ protected:
     virtual void BeginPlay() override;
 
     // ===== Hook =====
-     /** ½ºÅÈ ÃÊ±âÈ­ ÈÅ(CurrentHealth = MaxHealth, ÀÌµ¿¼Óµµ Àû¿ë µî). */
+     /** ìŠ¤íƒ¯ ì´ˆê¸°í™” í›…(CurrentHealth = MaxHealth, ì´ë™ì†ë„ ì ìš© ë“±). */
     UFUNCTION(BlueprintNativeEvent, Category = "Stats")
     void InitializeStats();
 
-    /** »ç¸Á Ã³¸® ÈÅ(Dead ÀüÈ¯, ÀÌµ¿/Ãæµ¹/ÀÔ·Â/AI ºñÈ°¼ºÈ­ µî). */
+    /** ì‚¬ë§ ì²˜ë¦¬ í›…(Dead ì „í™˜, ì´ë™/ì¶©ëŒ/ì…ë ¥/AI ë¹„í™œì„±í™” ë“±). */
     UFUNCTION(BlueprintNativeEvent, Category = "LifeCycle")
     void Die();
 
-    /** ÇÇ°İ ¸®¾×¼Ç ÈÅ(»óÅÂ=Hit, ¸ùÅ¸ÁÖ/°æÁ÷ µî). */
+    /** í”¼ê²© ë¦¬ì•¡ì…˜ í›…(ìƒíƒœ=Hit, ëª½íƒ€ì£¼/ê²½ì§ ë“±). */
     UFUNCTION(BlueprintNativeEvent, Category = "Combat|Hit")
     void OnHitReaction();
 
-    /** »óÅÂ ÀüÀÌ(Áß¾ÓÁıÁß). Dead´Â µÇµ¹¸®Áö ¾ÊÀ½. */
+    /** ìƒíƒœ ì „ì´(ì¤‘ì•™ì§‘ì¤‘). DeadëŠ” ë˜ëŒë¦¬ì§€ ì•ŠìŒ. */
     UFUNCTION(BlueprintCallable, Category = "State", meta = (BlueprintProtected = "true"))
     void SetCharacterState(ECharacterState NewState);
 
@@ -180,12 +184,12 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Target")
     FText TargetDisplayName;
 
-    // ===== »óÅÂ ¸Ó½Å ¿¬°á¿ë hook =====
+    // ===== ìƒíƒœ ë¨¸ì‹  ì—°ê²°ìš© hook =====
     virtual bool CanEnterDodgeFromCurrentState() const;
     virtual void OnDodgeStarted_StateHook();
     virtual void OnDodgeEnded_StateHook();
 
-    // ===== ¶ô¿Â ½Ã½ºÅÛ ¿¬°á¿ë hook =====
+    // ===== ë½ì˜¨ ì‹œìŠ¤í…œ ì—°ê²°ìš© hook =====
     virtual bool IsLockOnActive() const;
     virtual AActor* GetCurrentLockOnTarget() const;
 
@@ -193,7 +197,7 @@ protected:
     /** Hard -> Soft -> nullptr(FreeAim) */
     AActor* ResolveBasicAttackTarget() const;
 
-    /** Lock-on: Àü¹æ Cone ³»¿¡¼­ °¡Àå ÀûÀıÇÑ Àû */
+    /** Lock-on: ì „ë°© Cone ë‚´ì—ì„œ ê°€ì¥ ì ì ˆí•œ ì  */
     AActor* FindLockOnTarget(
         const FVector& ViewLocation,
         const FVector& ViewForward,
@@ -204,16 +208,16 @@ protected:
         ECollisionChannel VisibilityChannel
     ) const;
 
-    /** Soft Lock-on: Àü¹æ Cone ³»¿¡¼­ °¡Àå ÀûÀıÇÑ Àû */
+    /** Soft Lock-on: ì „ë°© Cone ë‚´ì—ì„œ ê°€ì¥ ì ì ˆí•œ ì  */
     AActor* FindSoftLockTarget(const FVector& ViewLocation, const FVector& ViewForward) const;
 
-    /** Å¸°ÙÀ» ¾îµğ·Î Á¶ÁØÇÒÁö(±âº»: Actor bounds center) */
+    /** íƒ€ê²Ÿì„ ì–´ë””ë¡œ ì¡°ì¤€í• ì§€(ê¸°ë³¸: Actor bounds center) */
     FVector GetTargetAimLocation(const AActor* TargetActor) const;
 
-    /** ControllerÀÇ ½ÃÁ¡(Ä«¸Ş¶ó) °¡Á®¿À±â: Player/AI °øÅë */
+    /** Controllerì˜ ì‹œì (ì¹´ë©”ë¼) ê°€ì ¸ì˜¤ê¸°: Player/AI ê³µí†µ */
     void GetControllerViewPoint(FVector& OutLocation, FRotator& OutRotation) const;
 
-    /** ÇÁ·ÎÁ§Å¸ÀÏ ¹ß»ç(Å¸°ÙÀÌ ÀÖÀ¸¸é ±× ¹æÇâ, ¾øÀ¸¸é Free Aim) */
+    /** í”„ë¡œì íƒ€ì¼ ë°œì‚¬(íƒ€ê²Ÿì´ ìˆìœ¼ë©´ ê·¸ ë°©í–¥, ì—†ìœ¼ë©´ Free Aim) */
     void FireBasicAttackProjectile(AActor* TargetActor);
 
     // ===== Mana Helpers =====
@@ -223,7 +227,7 @@ protected:
     void BroadcastManaChanged();
 
     // ===== Dodge =====
-    /** ÀÔ·Â½Ã Forward Roll ¸ùÅ¸ÁÖ ¹«ÀÔ·Â½Ã Backstep ¸ùÅ¸ÁÖ */
+    /** ì…ë ¥ì‹œ Forward Roll ëª½íƒ€ì£¼ ë¬´ì…ë ¥ì‹œ Backstep ëª½íƒ€ì£¼ */
     UPROPERTY(EditDefaultsOnly, Category = "Dodge|Anim")
     TObjectPtr<UAnimMontage> DodgeForwardRollMontage = nullptr;
     
@@ -257,7 +261,7 @@ protected:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Dodge|Runtime", meta = (AllowPrivateAccess = "true"))
     EDodgeDirection CurrentDodgeDirection = EDodgeDirection::None;
 
-    // È¸ÇÇ Àü È¸Àü °ü·Ã ¼³Á¤ ÀúÀå
+    // íšŒí”¼ ì „ íšŒì „ ê´€ë ¨ ì„¤ì • ì €ì¥
     bool bSavedOrientRotationToMovement = false;
     bool bSavedUseControllerDesiredRotation = false;
     bool bSavedUseControllerRotationYaw = false;
@@ -265,18 +269,18 @@ protected:
     bool CanStartDodge() const;
     bool HasMeaningfulMoveInput(const FVector2D& MoveInput) const;
 
-    // °øÅë
+    // ê³µí†µ
     FVector GetDesiredMoveWorldDirection(const FVector2D& MoveInput) const;
     void FaceWorldDirection(const FVector& WorldDirection);
 
-    // ¶ô¿Â ±âÁØÃà
+    // ë½ì˜¨ ê¸°ì¤€ì¶•
     FVector GetLockOnBasisForward() const;
     FVector GetLockOnBasisRight() const;
 
-    // ¹æÇâ ¼±ÅÃ
+    // ë°©í–¥ ì„ íƒ
     EDodgeDirection SelectDodgeDirection(const FVector2D& MoveInput) const;
     
-    // ¹æÇâ °áÁ¤, ¸ùÅ¸ÁÖ hook Staff ¸ğµå ½Ã Staff ´åÁö »ç¿ë
+    // ë°©í–¥ ê²°ì •, ëª½íƒ€ì£¼ hook Staff ëª¨ë“œ ì‹œ Staff ë‹·ì§€ ì‚¬ìš©
     virtual EDodgeDirection ResolveDodgeDirection(
         const FVector2D& MoveInput,
         bool bHasDirectionalInput
@@ -289,37 +293,48 @@ protected:
     ) const;
     UAnimMontage* GetDodgeMontage(EDodgeDirection Direction) const;
 
-    // ½ÇÁ¦·Î ±¸¸¦ ¿ùµå ¹æÇâ
-    // ¶ô¿Â OFF: ÀÔ·Â ¹æÇâ ±×´ë·Î(¾Æ³¯·Î±× °¢µµ À¯Áö)
-    // ¶ô¿Â ON : Å¸°Ù ±âÁØ 4¹æÇâÀ¸·Î Á¤±ÔÈ­
+    // ì‹¤ì œë¡œ êµ¬ë¥¼ ì›”ë“œ ë°©í–¥
+    // ë½ì˜¨ OFF: ì…ë ¥ ë°©í–¥ ê·¸ëŒ€ë¡œ(ì•„ë‚ ë¡œê·¸ ê°ë„ ìœ ì§€)
+    // ë½ì˜¨ ON : íƒ€ê²Ÿ ê¸°ì¤€ 4ë°©í–¥ìœ¼ë¡œ ì •ê·œí™”
     void BeginDodge(UAnimMontage* MontageToPlay, EDodgeDirection Direction);
     void EndDodge();
     void OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 
 protected:
-    // ===== Tuning (ÆÄ»ı Å¬·¡½º/µğÆúÆ®¿¡¼­ Á¶Á¤) =====
-    /** ÃÖ´ë Health (>= 1). */
+    // ===== Tuning (íŒŒìƒ í´ë˜ìŠ¤/ë””í´íŠ¸ì—ì„œ ì¡°ì •) =====
+    /** ìµœëŒ€ Health (>= 1). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stats|HP", meta = (ClampMin = "1.0", UIMin = "1.0"))
     float MaxHealth = 100.f;
 
-    /** ÃÖ´ë Mana (>= 0). */
+    /** ìµœëŒ€ Mana (>= 0). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stats|Mana", meta = (ClampMin = "0.0", UIMin = "0.0"))
     float MaxMana = 100.f;
 
-    /** °È±â ¼Óµµ (cm/s). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+    float HitRecoveryDuration = 0.35f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Debug")
+    bool bEnableCombatDebug = false;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Runtime", meta = (AllowPrivateAccess = "true"))
+    bool bHasPerformedBasicAttackHit = false;
+
+
+    FTimerHandle HitRecoveryTimerHandle;
+    /** ê±·ê¸° ì†ë„ (cm/s). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Speed", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm/s"))
     float WalkSpeed = 200.f;
 
-    /** ´Ş¸®±â ¼Óµµ (cm/s). */
+    /** ë‹¬ë¦¬ê¸° ì†ë„ (cm/s). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Speed", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm/s"))
     float RunSpeed = 400.f;
 
-    /** È¸Àü ¼Óµµ(º¸°£¿ë) (deg/s). */
+    /** íšŒì „ ì†ë„(ë³´ê°„ìš©) (deg/s). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Rotation", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "deg/s"))
     float RotationSpeed = 720.f;
 
-    /** ±âº» °ø°İ µ¥¹ÌÁö. */
+    /** ê¸°ë³¸ ê³µê²© ë°ë¯¸ì§€. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Basic", meta = (ClampMin = "0.0", UIMin = "0.0"))
     float BaseAttackDamage = 10.f;
 
@@ -329,12 +344,12 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Basic|Casting", meta = (ClampMin = "0.0", UIMin = "0.0"))
     float BasicAttackManaCost = 5.f;
 
-    /** ±âº» °ø°İ Äğ´Ù¿î (s). */
+    /** ê¸°ë³¸ ê³µê²© ì¿¨ë‹¤ìš´ (s). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Basic", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
     float AttackCooldown = 0.5f;
 
     // ===== Projectile (Far Attack) =====
-    /** ¸Ö¸® ÀÖÀ» ¶§ »ç¿ëÇÒ ¹ß»çÃ¼ Å¬·¡½º */
+    /** ë©€ë¦¬ ìˆì„ ë•Œ ì‚¬ìš©í•  ë°œì‚¬ì²´ í´ë˜ìŠ¤ */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Basic|Projectile")
     TSubclassOf<ABaseMagicProjectile> BasicAttackProjectileClass;
 
@@ -344,14 +359,14 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Basic|Projectile")
     FVector BasicAttackMuzzleOffset = FVector::ZeroVector;
 
-    // ===== Soft Lock-on ÀÚµ¿ Å¸°Ù =====
+    // ===== Soft Lock-on ìë™ íƒ€ê²Ÿ =====
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Targeting|SoftLock", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
     float SoftLockMaxDistance = 2000.f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Targeting|SoftLock", meta = (ClampMin = "0.0", ClampMax = "180.0", UIMin = "0.0", UIMax = "180.0", Units = "deg"))
     float SoftLockMaxAngleDegrees = 25.f;
 
-    /** º® µÚ¿¡ ÀÖ´Â ÀûÀº Á¦°Å */
+    /** ë²½ ë’¤ì— ìˆëŠ” ì ì€ ì œê±° */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Targeting|SoftLock")
     bool bSoftLockRequireLineOfSight = true;
 
@@ -359,28 +374,28 @@ protected:
     TEnumAsByte<ECollisionChannel> SoftLockVisibilityChannel = ECC_Visibility;
 
 private:
-    // ===== Runtime (Á÷Á¢ ¼öÁ¤ ±İÁö, ReadOnly¸¸) =====
-    /** ÇöÀç Health. [0..MaxHealth] */
+    // ===== Runtime (ì§ì ‘ ìˆ˜ì • ê¸ˆì§€, ReadOnlyë§Œ) =====
+    /** í˜„ì¬ Health. [0..MaxHealth] */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats|HP", meta = (AllowPrivateAccess = "true"))
     float CurrentHealth = 0.f;
 
-    /** ÇöÀç Mana. [0..MaxMana] */
+    /** í˜„ì¬ Mana. [0..MaxMana] */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats|Mana", meta = (AllowPrivateAccess = "true"))
     float CurrentMana = 0.f;
 
-    /** ´Ş¸®±â »óÅÂ(¼Óµµ Àû¿ëÀº CharacterMovement ÂÊ¿¡¼­). */
+    /** ë‹¬ë¦¬ê¸° ìƒíƒœ(ì†ë„ ì ìš©ì€ CharacterMovement ìª½ì—ì„œ). */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Movement|Runtime", meta = (AllowPrivateAccess = "true"))
     bool bIsRunning = false;
 
-    /** °ø°İ ÁøÇà ÁßÀÎÁö(Áßº¹ Start ¹æÁö). */
+    /** ê³µê²© ì§„í–‰ ì¤‘ì¸ì§€(ì¤‘ë³µ Start ë°©ì§€). */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Runtime", meta = (AllowPrivateAccess = "true"))
     bool bIsAttacking = false;
 
-    /** ¸¶Áö¸· °ø°İ ½Ã°¢(ÃÊ). AttackCooldown °è»ê¿¡ »ç¿ë. */
+    /** ë§ˆì§€ë§‰ ê³µê²© ì‹œê°(ì´ˆ). AttackCooldown ê³„ì‚°ì— ì‚¬ìš©. */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Runtime", meta = (AllowPrivateAccess = "true"))
     float LastAttackTime = -9999.f;
 
-    /** ÇöÀç »óÅÂ(»óÅÂ ¸Ó½Å). */
+    /** í˜„ì¬ ìƒíƒœ(ìƒíƒœ ë¨¸ì‹ ). */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
     ECharacterState CurrentState = ECharacterState::Idle;
 };

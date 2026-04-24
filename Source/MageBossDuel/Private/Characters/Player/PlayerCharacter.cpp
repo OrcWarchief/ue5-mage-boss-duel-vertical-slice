@@ -198,6 +198,15 @@ void APlayerCharacter::ToggleLockOn(const FInputActionValue& Value)
 
 	if (bLockOnActive && IsValid(LockOnTarget))
 	{
+		if (const ABaseCharacter* TargetCharacter = Cast<ABaseCharacter>(LockOnTarget))
+		{
+			if (!TargetCharacter->IsAlive())
+			{
+				StopLockOn();
+				return;
+			}
+		}
+
 		StopLockOn();
 		return;
 	}
@@ -223,7 +232,7 @@ void APlayerCharacter::ToggleLockOn(const FInputActionValue& Value)
 	{
 		StartLockOn(Target);
 	}
-	else if (GEngine)
+	else if (bEnableLockOnDebug && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, TEXT("LockOn: No Target"));
 	}
@@ -251,7 +260,20 @@ void APlayerCharacter::BasicAttack(const FInputActionValue& Value)
 
 AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const
 {
-	return (bLockOnActive && IsValid(LockOnTarget)) ? LockOnTarget : nullptr;
+	if (!bLockOnActive || !IsValid(LockOnTarget))
+	{
+		return nullptr;
+	}
+
+	if (const ABaseCharacter* TargetCharacter = Cast<ABaseCharacter>(LockOnTarget))
+	{
+		if (!TargetCharacter->IsAlive())
+		{
+			return nullptr;
+		}
+	}
+
+	return LockOnTarget;
 }
 
 EDodgeDirection APlayerCharacter::ResolveDodgeDirection(const FVector2D& MoveInput, bool bHasDirectionalInput) const
@@ -300,7 +322,7 @@ void APlayerCharacter::StartLockOn(AActor* NewTarget)
 	bUseControllerRotationYaw = true;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 
-	if (GEngine)
+	if (bEnableLockOnDebug && GEngine)
 	{
 		const FString Msg = FString::Printf(TEXT("StartLockOn() : Lock On (On) : %s"), *NewTarget->GetName());
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Green, Msg);
@@ -315,7 +337,7 @@ void APlayerCharacter::StopLockOn()
 	bUseControllerRotationYaw = false;
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 
-	if (GEngine)
+	if (bEnableLockOnDebug && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Silver, TEXT("StopLockOn() : Lock On (Off)"));
 	}
@@ -340,6 +362,15 @@ void APlayerCharacter::UpdateLockOn(float DeltaTime)
 		return;
 	}
 
+	if (const ABaseCharacter* TargetCharacter = Cast<ABaseCharacter>(LockOnTarget))
+	{
+		if (!TargetCharacter->IsAlive())
+		{
+			StopLockOn();
+			return;
+		}
+	}
+
 	FVector ViewLoc;
 	FRotator ViewRot;
 	Controller->GetPlayerViewPoint(ViewLoc, ViewRot);
@@ -356,7 +387,7 @@ void APlayerCharacter::UpdateLockOn(float DeltaTime)
 	const FRotator NextControlRot = FMath::RInterpTo(CurrentControlRot, DesiredRot, DeltaTime, LockOnInterpSpeed);
 	Controller->SetControlRotation(NextControlRot);
 
-	if (GEngine)
+	if (bEnableLockOnDebug)
 	{
 		DrawDebugLine(GetWorld(), ViewLoc, AimLoc, FColor::Green, false, 0.f, 0, 0.2f);
 	}
@@ -364,7 +395,7 @@ void APlayerCharacter::UpdateLockOn(float DeltaTime)
 
 void APlayerCharacter::OnTargetSwitchX(const FInputActionValue& Value)
 {
-	if (GEngine)
+	if (bEnableLockOnDebug && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, TEXT("OnTargetSwitchX Start"));
 	}
@@ -381,7 +412,7 @@ void APlayerCharacter::OnTargetSwitchX(const FInputActionValue& Value)
 	const int32 DirectionSign = (Axis > 0.f) ? 1 : -1;
 	const bool bSwitched = TrySwitchLockOnTarget(DirectionSign);
 
-	if (GEngine)
+	if (bEnableLockOnDebug && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(
 			-1,
@@ -399,7 +430,7 @@ void APlayerCharacter::OnTargetSwitchXReleased(const FInputActionValue& Value)
 {
 	bTargetSwitchReady = true;
 
-	if (GEngine)
+	if (bEnableLockOnDebug && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Silver, TEXT("OnTargetSwitchXReleased"));
 	}
@@ -410,7 +441,7 @@ bool APlayerCharacter::TrySwitchLockOnTarget(int32 DirectionSign)
 	AActor* NewTarget = FindSwitchTarget(DirectionSign);
 	if (!IsValid(NewTarget))
 	{
-		if (GEngine)
+		if (bEnableLockOnDebug && GEngine)
 		{
 			const TCHAR* Side = (DirectionSign > 0) ? TEXT("Right") : TEXT("Left");
 			GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Silver, FString::Printf(TEXT("Switch %s: None"), Side));
@@ -418,7 +449,7 @@ bool APlayerCharacter::TrySwitchLockOnTarget(int32 DirectionSign)
 		return false;
 	}
 	LockOnTarget = NewTarget;
-	if (GEngine)
+	if (bEnableLockOnDebug && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Green, FString::Printf(TEXT("Switch: %s"), *NewTarget->GetName()));
 	}
@@ -427,7 +458,10 @@ bool APlayerCharacter::TrySwitchLockOnTarget(int32 DirectionSign)
 	FVector ViewLoc; FRotator ViewRot;
 	GetControllerViewPoint(ViewLoc, ViewRot);
 	
-	DrawDebugLine(GetWorld(), ViewLoc, GetTargetAimLocation(NewTarget), FColor::Magenta, false, 0.6f, 0, 2.f);
+	if (bEnableLockOnDebug)
+	{
+		DrawDebugLine(GetWorld(), ViewLoc, GetTargetAimLocation(NewTarget), FColor::Magenta, false, 0.6f, 0, 2.f);
+	}
 
 	return true;
 }
@@ -477,10 +511,13 @@ AActor* APlayerCharacter::FindSwitchTarget(int32 DirectionSign) const
 		QueryParams
 	);
 
-	// µπˆ±◊ 
-	DrawDebugSphere(World, SearchCenter, MaxDistance, 12, FColor::Orange, false, 1.0f, 0, 1.0f);
+	if (bEnableLockOnDebug)
+	{
+		DrawDebugSphere(World, SearchCenter, MaxDistance, 12, FColor::Orange, false, 1.0f, 0, 1.0f);
+	}
+	if (bEnableLockOnDebug && GEngine)
 
-	if (!bAny) { return nullptr; }
+		if (bEnableLockOnDebug && GEngine)
 
 	float BestScore = FLT_MAX;
 	AActor* BestTarget = nullptr;
@@ -522,10 +559,10 @@ AActor* APlayerCharacter::FindSwitchTarget(int32 DirectionSign) const
 		const FVector Dir = ToCandidate / Dist;
 		const float Dot = FVector::DotProduct(ViewForward, Dir);
 
-		// ¿¸πÊ ƒ‹ ∏æÁ « ≈Õ
+		// Ï†ÑÎ∞© ÏΩò Î™®Ïñë ÌïÑÌÑ∞
 		if (Dot < CosThreshold) { continue; }
 
-		// LOS « ≈Õ (∫Æ µ⁄ µÓ Ω√æﬂ ø°º≠ æ»∫∏¿Ã¥¬∞≈ ¡¶ø‹)
+		// LOS ÌïÑÌÑ∞ (Î≤Ω Îí§ Îì± ÏãúÏïº ÏóêÏÑú ÏïàÎ≥¥Ïù¥ÎäîÍ±∞ Ï†úÏô∏)
 		if (bLockOnRequireLineOfSight)
 		{
 			FHitResult Hit;
@@ -555,7 +592,7 @@ AActor* APlayerCharacter::FindSwitchTarget(int32 DirectionSign) const
 		const float Dx = N.X - CurrN.X;
 		const float Dy = FMath::Abs(N.Y - CurrN.Y);
 
-		if (DirectionSign > 0) // »≠∏È¿« ø¿∏•¬ ¿Ã∏È
+		if (DirectionSign > 0) // ÌôîÎ©¥Ïùò Ïò§Î•∏Ï™ΩÏù¥Î©¥
 		{
 			if (Dx <= TargetSwitchMinNormDx) continue;
 
@@ -566,7 +603,7 @@ AActor* APlayerCharacter::FindSwitchTarget(int32 DirectionSign) const
 				BestTarget = Candidate;
 			}
 		}
-		else // DirectionSign < 0  »≠∏È¿« øﬁ¬ ¿Ã∏È
+		else // DirectionSign < 0  ÌôîÎ©¥Ïùò ÏôºÏ™ΩÏù¥Î©¥
 		{
 			if (-Dx <= TargetSwitchMinNormDx) continue;
 
