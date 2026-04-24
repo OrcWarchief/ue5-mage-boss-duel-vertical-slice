@@ -15,12 +15,13 @@ ABaseMagicProjectile::ABaseMagicProjectile()
 	RootComponent = CollisionComp;
 	CollisionComp->InitSphereRadius(16.f);
 
-	CollisionComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CollisionComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	CollisionComp->SetCollisionObjectType(ECC_WorldDynamic);
-	CollisionComp->SetCollisionResponseToAllChannels(ECR_Ignore);
+	CollisionComp->SetCollisionResponseToAllChannels(ECR_Block);
 	CollisionComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	CollisionComp->SetGenerateOverlapEvents(true);
 	CollisionComp->OnComponentBeginOverlap.AddDynamic(this, &ABaseMagicProjectile::OnProjectileBeginOverlap);
+	CollisionComp->OnComponentHit.AddDynamic(this, &ABaseMagicProjectile::OnProjectileHit);
 
 	MeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComp"));
 	MeshComp->SetupAttachment(CollisionComp);
@@ -87,6 +88,16 @@ void ABaseMagicProjectile::OnProjectileBeginOverlap(UPrimitiveComponent* Overlap
 	}
 
 	HitCharacter->ApplyDamage(Damage, AttackCharacter);
+
+	Destroy();
+}
+
+void ABaseMagicProjectile::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+{
+	if (!IsValid(OtherActor) || OtherActor == this || OtherActor == GetOwner() || OtherActor == GetInstigator())
+	{
+		return;
+	}
 
 	Destroy();
 }
