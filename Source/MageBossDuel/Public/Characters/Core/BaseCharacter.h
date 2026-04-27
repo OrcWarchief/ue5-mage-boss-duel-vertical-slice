@@ -151,6 +151,9 @@ public:
     bool TryStartDodge(const FVector2D& MoveInput);
     bool IsDodging() const { return CurrentState == ECharacterState::Dodging; }
 
+    UFUNCTION(BlueprintPure, Category = "State")
+    ECharacterState GetCurrentState() const { return CurrentState; }
+
 protected:
     virtual void BeginPlay() override;
 
@@ -393,9 +396,9 @@ private:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Runtime", meta = (AllowPrivateAccess = "true"))
     float LastAttackTime = -9999.f;
 
+    FTimerHandle HitRecoveryTimerHandle;
+
     /** 현재 상태(상태 머신). */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
     ECharacterState CurrentState = ECharacterState::Idle;
-
-    FTimerHandle HitRecoveryTimerHandle;
 };
