@@ -10,6 +10,12 @@
 AMageBossCharacter::AMageBossCharacter()
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		MeshComp->VisibilityBasedAnimTickOption =
+			EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	}
 }
 
 // ===== Target =====
@@ -81,7 +87,7 @@ bool AMageBossCharacter::CanStartTeleport(EDodgeDirection RequestedDirection) co
 		return false;
 	}
 
-	if (!GetTeleportMontage(Direction))
+	if (!HasAnyValidTeleportMontagePair())
 	{
 		return false;
 	}
@@ -109,13 +115,19 @@ bool AMageBossCharacter::TryStartTeleport(EDodgeDirection RequestedDirection)
 		return false;
 	}
 
-	UAnimMontage* MontageToPlay = GetTeleportMontage(ResolvedDirection);
-	if (!MontageToPlay)
+	const int32 MontagePairIndex = ChooseTeleportMontagePairIndex();
+	if (MontagePairIndex == INDEX_NONE)
 	{
 		return false;
 	}
 
-	BeginTeleport(MontageToPlay, ResolvedDirection, Destination);
+	UAnimMontage* BeginMontage = GetTeleportBeginMontage(MontagePairIndex);
+	if (!BeginMontage)
+	{
+		return false;
+	}
+
+	BeginTeleport(BeginMontage, ResolvedDirection, Destination, MontagePairIndex);
 	return true;
 }
 
@@ -197,12 +209,13 @@ void AMageBossCharacter::Die_Implementation()
 // ===== Teleport Flow =====
 
 void AMageBossCharacter::BeginTeleport(
-	UAnimMontage* MontageToPlay,
+	UAnimMontage* BeginMontage,
 	EDodgeDirection Direction,
-	const FVector& Destination
+	const FVector& Destination,
+	int32 MontagePairIndex
 )
 {
-	if (!MontageToPlay)
+	if (!BeginMontage)
 	{
 		return;
 	}
@@ -216,9 +229,11 @@ void AMageBossCharacter::BeginTeleport(
 	TeleportRuntime.Direction = Direction;
 	TeleportRuntime.Phase = ETeleportPhase::Startup;
 	TeleportRuntime.Destination = Destination;
+	TeleportRuntime.MontagePairIndex = MontagePairIndex;
 	TeleportRuntime.bMeshHidden = false;
 
-	ActiveTeleportMontage = MontageToPlay;
+	ActiveTeleportMontage = BeginMontage;
+	ActiveTeleportMontageStage = ETeleportMontageStage::Begin;
 
 	SetCharacterState(ECharacterState::Attacking);
 	FreezeMovementForTeleport();
@@ -228,7 +243,7 @@ void AMageBossCharacter::BeginTeleport(
 		FaceWorldDirection(GetLockOnBasisForward());
 	}
 
-	const float PlayLength = AnimInstance->Montage_Play(MontageToPlay);
+	const float PlayLength = AnimInstance->Montage_Play(BeginMontage);
 	if (PlayLength <= 0.0f)
 	{
 		CancelTeleport(true, true);
@@ -236,8 +251,8 @@ void AMageBossCharacter::BeginTeleport(
 	}
 
 	FOnMontageEnded MontageEndedDelegate;
-	MontageEndedDelegate.BindUObject(this, &AMageBossCharacter::OnTeleportMontageEnded);
-	AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, MontageToPlay);
+	MontageEndedDelegate.BindUObject(this, &AMageBossCharacter::OnTeleportBeginMontageEnded);
+	AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, BeginMontage);
 
 	if (UWorld* World = GetWorld())
 	{
@@ -245,6 +260,7 @@ void AMageBossCharacter::BeginTeleport(
 	}
 
 	LastTeleportDirection = Direction;
+	LastTeleportMontagePairIndex = MontagePairIndex;
 }
 
 void AMageBossCharacter::EndTeleport()
@@ -258,6 +274,7 @@ void AMageBossCharacter::EndTeleport()
 
 	TeleportRuntime = FTeleportRuntime();
 	ActiveTeleportMontage = nullptr;
+	ActiveTeleportMontageStage = ETeleportMontageStage::None;
 
 	RestoreMovementAfterTeleport();
 
@@ -289,6 +306,7 @@ void AMageBossCharacter::CancelTeleport(bool bRestoreNeutralState, bool bRestore
 
 	TeleportRuntime = FTeleportRuntime();
 	ActiveTeleportMontage = nullptr;
+	ActiveTeleportMontageStage = ETeleportMontageStage::None;
 
 	if (bRestoreMovement)
 	{
@@ -316,14 +334,48 @@ void AMageBossCharacter::CancelTeleport(bool bRestoreNeutralState, bool bRestore
 	}
 }
 
-void AMageBossCharacter::OnTeleportMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+void AMageBossCharacter::PlayTeleportEndMontage()
 {
-	if (Montage != ActiveTeleportMontage.Get())
+	if (TeleportRuntime.Phase != ETeleportPhase::Hidden)
 	{
+		CancelTeleport(true, true);
 		return;
 	}
 
-	EndTeleport();
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		ReappearTeleport();
+		EndTeleport();
+		return;
+	}
+
+	UAnimMontage* EndMontage = GetTeleportEndMontage(TeleportRuntime.MontagePairIndex);
+	if (!EndMontage)
+	{
+		ReappearTeleport();
+		EndTeleport();
+		return;
+	}
+
+	ActiveTeleportMontage = EndMontage;
+	ActiveTeleportMontageStage = ETeleportMontageStage::End;
+
+	const float PlayLength = AnimInstance->Montage_Play(EndMontage);
+	if (PlayLength <= 0.0f)
+	{
+		ReappearTeleport();
+		EndTeleport();
+		return;
+	}
+
+	FOnMontageEnded MontageEndedDelegate;
+	MontageEndedDelegate.BindUObject(
+		this,
+		&AMageBossCharacter::OnTeleportEndMontageEnded
+	);
+
+	AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, EndMontage);
 }
 
 // ===== Teleport Selection =====
@@ -383,37 +435,118 @@ EDodgeDirection AMageBossCharacter::ChooseTeleportDirectionForAI() const
 	return PickedDirection;
 }
 
-UAnimMontage* AMageBossCharacter::GetTeleportMontage(EDodgeDirection Direction) const
+bool AMageBossCharacter::HasAnyValidTeleportMontagePair() const
 {
-	switch (Direction)
+	for (const FTeleportMontagePair& Pair : TeleportMontagePairs)
 	{
-	case EDodgeDirection::Forward:
-		return TeleportForwardMontage.Get();
+		if (Pair.IsValidPair())
+		{
+			return true;
+		}
+	}
 
-	case EDodgeDirection::Backward:
-		return TeleportBackwardMontage.Get();
+	return false;
+}
 
-	case EDodgeDirection::Left:
-		return TeleportLeftMontage.Get();
+int32 AMageBossCharacter::ChooseTeleportMontagePairIndex() const
+{
+	TArray<int32> ValidIndices;
 
-	case EDodgeDirection::Right:
-		return TeleportRightMontage.Get();
+	for (int32 Index = 0; Index < TeleportMontagePairs.Num(); ++Index)
+	{
+		if (TeleportMontagePairs[Index].IsValidPair())
+		{
+			ValidIndices.Add(Index);
+		}
+	}
 
-	case EDodgeDirection::ForwardLeft:
-		return TeleportForwardLeftMontage.Get();
+	if (ValidIndices.Num() == 0)
+	{
+		return INDEX_NONE;
+	}
 
-	case EDodgeDirection::ForwardRight:
-		return TeleportForwardRightMontage.Get();
+	int32 PickedArrayIndex = FMath::RandRange(0, ValidIndices.Num() - 1);
 
-	case EDodgeDirection::BackwardLeft:
-		return TeleportBackwardLeftMontage.Get();
+	if (ValidIndices.Num() > 1 && ValidIndices[PickedArrayIndex] == LastTeleportMontagePairIndex)
+	{
+		PickedArrayIndex = (PickedArrayIndex + 1) % ValidIndices.Num();
+	}
 
-	case EDodgeDirection::BackwardRight:
-		return TeleportBackwardRightMontage.Get();
+	return ValidIndices[PickedArrayIndex];
+}
 
-	default:
+UAnimMontage* AMageBossCharacter::GetTeleportBeginMontage(int32 PairIndex) const
+{
+	if (!TeleportMontagePairs.IsValidIndex(PairIndex))
+	{
 		return nullptr;
 	}
+
+	return TeleportMontagePairs[PairIndex].BeginMontage.Get();
+}
+
+UAnimMontage* AMageBossCharacter::GetTeleportEndMontage(int32 PairIndex) const
+{
+	if (!TeleportMontagePairs.IsValidIndex(PairIndex))
+	{
+		return nullptr;
+	}
+
+	return TeleportMontagePairs[PairIndex].EndMontage.Get();
+}
+
+void AMageBossCharacter::OnTeleportBeginMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (ActiveTeleportMontageStage != ETeleportMontageStage::Begin)
+	{
+		return;
+	}
+
+	if (Montage != ActiveTeleportMontage.Get())
+	{
+		return;
+	}
+
+	ActiveTeleportMontage = nullptr;
+	ActiveTeleportMontageStage = ETeleportMontageStage::None;
+
+	if (bInterrupted)
+	{
+		CancelTeleport(true, true);
+		return;
+	}
+
+	if (TeleportRuntime.Phase == ETeleportPhase::Startup)
+	{
+		CancelTeleport(true, true);
+		return;
+	}
+
+	if (TeleportRuntime.Phase == ETeleportPhase::Hidden)
+	{
+		PlayTeleportEndMontage();
+		return;
+	}
+
+	if (TeleportRuntime.Phase == ETeleportPhase::Recovery)
+	{
+		EndTeleport();
+	}
+}
+
+void AMageBossCharacter::OnTeleportEndMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (ActiveTeleportMontageStage != ETeleportMontageStage::End)
+	{
+		return;
+	}
+
+	if (Montage != ActiveTeleportMontage.Get())
+	{
+		return;
+	}
+
+	EndTeleport();
 }
 
 // ===== Destination =====

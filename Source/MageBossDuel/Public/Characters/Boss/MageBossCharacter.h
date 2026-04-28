@@ -16,6 +16,31 @@ enum class ETeleportPhase : uint8
 	Recovery UMETA(DisplayName = "Recovery")
 };
 
+UENUM(BlueprintType)
+enum class ETeleportMontageStage : uint8
+{
+	None UMETA(DisplayName = "None"),
+	Begin UMETA(DisplayName = "Begin"),
+	End UMETA(DisplayName = "End")
+};
+
+USTRUCT(BlueprintType)
+struct FTeleportMontagePair
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Teleport")
+	TObjectPtr<UAnimMontage> BeginMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Teleport")
+	TObjectPtr<UAnimMontage> EndMontage = nullptr;
+
+	bool IsValidPair() const
+	{
+		return BeginMontage.Get() != nullptr && EndMontage.Get() != nullptr;
+	}
+};
+
 USTRUCT(BlueprintType)
 struct FTeleportRuntime
 {
@@ -29,6 +54,9 @@ struct FTeleportRuntime
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Teleport")
 	FVector Destination = FVector::ZeroVector;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Teleport")
+	int32 MontagePairIndex = INDEX_NONE;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Teleport")
 	bool bMeshHidden = false;
@@ -87,28 +115,7 @@ protected:
 	// ===== Teleport Anim =====
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|Anim")
-	TObjectPtr<UAnimMontage> TeleportForwardMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|Anim")
-	TObjectPtr<UAnimMontage> TeleportBackwardMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|Anim")
-	TObjectPtr<UAnimMontage> TeleportLeftMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|Anim")
-	TObjectPtr<UAnimMontage> TeleportRightMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|Anim")
-	TObjectPtr<UAnimMontage> TeleportForwardLeftMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|Anim")
-	TObjectPtr<UAnimMontage> TeleportForwardRightMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|Anim")
-	TObjectPtr<UAnimMontage> TeleportBackwardLeftMontage = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|Anim")
-	TObjectPtr<UAnimMontage> TeleportBackwardRightMontage = nullptr;
+	TArray<FTeleportMontagePair> TeleportMontagePairs;
 
 	// ===== Teleport Tuning =====
 
@@ -162,18 +169,31 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|Teleport|Runtime")
 	EDodgeDirection LastTeleportDirection = EDodgeDirection::None;
 
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|Teleport|Runtime")
+	int32 LastTeleportMontagePairIndex = INDEX_NONE;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> ActiveTeleportMontage = nullptr;
 
-	EDodgeDirection ChooseTeleportDirectionForAI() const;
-	UAnimMontage* GetTeleportMontage(EDodgeDirection Direction) const;
+	UPROPERTY(Transient)
+	ETeleportMontageStage ActiveTeleportMontageStage = ETeleportMontageStage::None;
 
-	void BeginTeleport(UAnimMontage* MontageToPlay, EDodgeDirection Direction, const FVector& Destination);
+	EDodgeDirection ChooseTeleportDirectionForAI() const;
+	bool HasAnyValidTeleportMontagePair() const;
+	int32 ChooseTeleportMontagePairIndex() const;
+
+	UAnimMontage* GetTeleportBeginMontage(int32 PairIndex) const;
+	UAnimMontage* GetTeleportEndMontage(int32 PairIndex) const;
+
+	void BeginTeleport(UAnimMontage* BeginMontage, EDodgeDirection Direction, const FVector& Destination, int32 MontagePairIndex);
 	void EndTeleport();
 	void CancelTeleport(bool bRestoreNeutralState, bool bRestoreMovement);
 
-	void OnTeleportMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	void PlayTeleportEndMontage();
+
+	void OnTeleportBeginMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	void OnTeleportEndMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	bool FindTeleportDestination(
 		EDodgeDirection RequestedDirection,
