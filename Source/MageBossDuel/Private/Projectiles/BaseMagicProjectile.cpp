@@ -36,6 +36,12 @@ ABaseMagicProjectile::ABaseMagicProjectile()
 
 	InitialLifeSpan = 3.f;
 
+	HitPayload.Damage = 10.0f;
+	HitPayload.PoiseDamage = 10.0f;
+	HitPayload.ReactionType = EHitReactionType::LightStagger;
+	HitPayload.bCanInterrupt = true;
+	HitPayload.bForceReaction = false;
+	HitPayload.bIgnorePoise = false;
 }
 
 // Called when the game starts or when spawned
@@ -87,7 +93,7 @@ void ABaseMagicProjectile::OnProjectileBeginOverlap(UPrimitiveComponent* Overlap
 		return;
 	}
 
-	HitCharacter->ApplyDamage(Damage, AttackCharacter);
+	HitCharacter->ApplyHitPayload(HitPayload, AttackCharacter);
 
 	Destroy();
 }
@@ -111,6 +117,12 @@ void ABaseMagicProjectile::Tick(float DeltaTime)
 
 void ABaseMagicProjectile::SetDamage(float NewDamage)
 {
-	Damage = FMath::Max(0.f, NewDamage);
+	HitPayload.Damage = FMath::Max(0.0f, NewDamage);
 }
 
+void ABaseMagicProjectile::SetHitPayload(const FHitPayload& NewHitPayload)
+{
+	HitPayload = NewHitPayload;
+	HitPayload.Damage = FMath::Max(0.0f, HitPayload.Damage);
+	HitPayload.PoiseDamage = FMath::Max(0.0f, HitPayload.PoiseDamage);
+}
