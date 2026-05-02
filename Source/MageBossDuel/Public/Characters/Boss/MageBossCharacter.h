@@ -6,6 +6,7 @@
 #include "MageBossCharacter.generated.h"
 
 class UAnimMontage;
+class AFireballProjectile;
 
 UENUM(BlueprintType)
 enum class ETeleportPhase : uint8
@@ -97,6 +98,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Skill|Teleport")
 	bool IsTeleporting() const { return TeleportRuntime.Phase != ETeleportPhase::None; }
 
+	// ===== Fireball =====
+
+	UFUNCTION(BlueprintPure, Category = "Skill|Fireball")
+	bool CanStartFireball() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Skill|Fireball")
+	bool TryStartFireball();
+
+	/** AnimNotify에서 호출 */
+	UFUNCTION(BlueprintCallable, Category = "Skill|Fireball|AnimNotify")
+	void LaunchFireball();
+
+	UFUNCTION(BlueprintPure, Category = "Skill|Fireball")
+	bool IsCastingFireball() const { return ActiveFireballMontage != nullptr; }
+
 protected:
 	// ===== BaseCharacter hooks =====
 
@@ -172,12 +188,46 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|Teleport|Runtime")
 	int32 LastTeleportMontagePairIndex = INDEX_NONE;
 
+	// ===== Fireball Anim =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball|Anim")
+	TObjectPtr<UAnimMontage> FireballMontage = nullptr;
+
+	// ===== Fireball Projectile =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball")
+	TSubclassOf<AFireballProjectile> FireballProjectileClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball")
+	FName FireballSpawnSocketName = TEXT("weapon_r");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float FireballCooldown = 5.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float FireballSpawnForwardOffset = 80.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball", meta = (Units = "cm"))
+	float FireballSpawnHeightOffset = 70.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball", meta = (Units = "cm"))
+	float FireballAimHeightOffset = 60.0f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|Fireball|Runtime")
+	float LastFireballTime = -9999.0f;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> ActiveTeleportMontage = nullptr;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> ActiveFireballMontage = nullptr;
+
+	UPROPERTY(Transient)
 	ETeleportMontageStage ActiveTeleportMontageStage = ETeleportMontageStage::None;
+
+	UPROPERTY(Transient)
+	bool bFireballLaunched = false;
 
 	EDodgeDirection ChooseTeleportDirectionForAI() const;
 	bool HasAnyValidTeleportMontagePair() const;
@@ -207,4 +257,10 @@ private:
 	void SetTeleportHiddenState(bool bHidden);
 	void FreezeMovementForTeleport();
 	void RestoreMovementAfterTeleport();
+
+	void EndFireball();
+	void CancelFireball(bool bStopMontage, bool bRestoreNeutralState);
+	void OnFireballMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	FVector GetFireballSpawnLocation() const;
+	FRotator GetFireballAimRotation(const FVector& SpawnLocation) const;
 };

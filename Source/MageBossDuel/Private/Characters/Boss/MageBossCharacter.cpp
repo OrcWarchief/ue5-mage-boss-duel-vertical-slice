@@ -1,4 +1,5 @@
 #include "Characters/Boss/MageBossCharacter.h"
+#include "Projectiles/FireballProjectile.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -23,6 +24,148 @@ AMageBossCharacter::AMageBossCharacter()
 void AMageBossCharacter::SetCombatTarget(AActor* NewTarget)
 {
 	CurrentCombatTarget = (IsValid(NewTarget) && NewTarget != this) ? NewTarget : nullptr;
+}
+
+bool AMageBossCharacter::CanStartFireball() const
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	if (IsTeleporting())
+	{
+		return false;
+	}
+
+	if (ActiveFireballMontage != nullptr)
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	if ((World->GetTimeSeconds() - LastFireballTime) < FireballCooldown)
+	{
+		return false;
+	}
+
+	if (!FireballMontage)
+	{
+		return false;
+	}
+
+	if (!FireballProjectileClass)
+	{
+		return false;
+	}
+
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp || !MeshComp->GetAnimInstance())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool AMageBossCharacter::TryStartFireball()
+{
+	if (!CanStartFireball())
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		return false;
+	}
+
+	ActiveFireballMontage = FireballMontage;
+	bFireballLaunched = false;
+	
+	SetCharacterState(ECharacterState::Attacking);
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->DisableMovement();
+	}
+
+	if (IsValid(CurrentCombatTarget.Get()))
+	{
+		FaceWorldDirection(GetLockOnBasisForward());
+	}
+
+	const float PlayLength = AnimInstance->Montage_Play(FireballMontage, 1.0f);
+	if (PlayLength <= 0.f)
+	{
+		CancelFireball(false, true);
+	}
+	
+	FOnMontageEnded MontageEndDelegate;
+	MontageEndDelegate.BindUObject(this, &AMageBossCharacter::OnFireballMontageEnded);
+
+	AnimInstance->Montage_SetEndDelegate(MontageEndDelegate, FireballMontage);
+
+	if (UWorld* World = GetWorld())
+	{
+		LastFireballTime = World->GetTimeSeconds();
+	}
+
+	return true;
+}
+
+void AMageBossCharacter::LaunchFireball()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (!ActiveFireballMontage)
+	{
+		return;
+	}
+
+	if (bFireballLaunched)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || !FireballProjectileClass)
+	{
+		return;
+	}
+
+	bFireballLaunched = true;
+
+	const FVector SpawnLocation = GetFireballSpawnLocation();
+	const FRotator SpawnRotation = GetFireballAimRotation(SpawnLocation);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	World->SpawnActor<AFireballProjectile>(
+		FireballProjectileClass,
+		SpawnLocation,
+		SpawnRotation,
+		SpawnParams
+	);
 }
 
 bool AMageBossCharacter::IsLockOnActive() const
@@ -188,8 +331,12 @@ void AMageBossCharacter::OnHitReaction_Implementation()
 {
 	if (IsTeleporting())
 	{
-		// 피격 리액션은 Super가 처리하므로 여기서는 텔포 런타임만 복구
 		CancelTeleport(false, true);
+	}
+
+	if (IsCastingFireball())
+	{
+		CancelFireball(true, false);
 	}
 
 	Super::OnHitReaction_Implementation();
@@ -199,8 +346,12 @@ void AMageBossCharacter::Die_Implementation()
 {
 	if (IsTeleporting())
 	{
-		// 사망 처리는 Super가 이동/충돌 비활성화를 다시 처리
 		CancelTeleport(false, false);
+	}
+
+	if (IsCastingFireball())
+	{
+		CancelFireball(true, false);
 	}
 
 	Super::Die_Implementation();
@@ -769,4 +920,107 @@ void AMageBossCharacter::RestoreMovementAfterTeleport()
 	{
 		MoveComp->SetMovementMode(MOVE_Walking);
 	}
+}
+
+void AMageBossCharacter::EndFireball()
+{
+	ActiveFireballMontage = nullptr;
+	bFireballLaunched = false;
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.0f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::CancelFireball(bool bStopMontage, bool bRestoreNeutralState)
+{
+	UAnimMontage* MontageToStop = ActiveFireballMontage.Get();
+
+	ActiveFireballMontage = nullptr;
+	bFireballLaunched = false;
+
+	if (bStopMontage && MontageToStop)
+	{
+		if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+		{
+			if (AnimInstance->Montage_IsPlaying(MontageToStop))
+			{
+				AnimInstance->Montage_Stop(0.05f, MontageToStop);
+			}
+		}
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (bRestoreNeutralState && IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::OnFireballMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != ActiveFireballMontage.Get())
+	{
+		return;
+	}
+
+	EndFireball();
+}
+
+FVector AMageBossCharacter::GetFireballSpawnLocation() const
+{
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+
+	if (MeshComp && MeshComp->DoesSocketExist(FireballSpawnSocketName))
+	{
+		return MeshComp->GetSocketLocation(FireballSpawnSocketName);
+	}
+
+	return GetActorLocation()
+		+ GetActorForwardVector() * FireballSpawnForwardOffset
+		+ FVector::UpVector * FireballSpawnHeightOffset;
+}
+
+FRotator AMageBossCharacter::GetFireballAimRotation(const FVector& SpawnLocation) const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+
+	if (IsValid(Target))
+	{
+		const FVector TargetLocation =
+			Target->GetActorLocation() + FVector::UpVector * FireballAimHeightOffset;
+
+		const FVector AimDirection = (TargetLocation - SpawnLocation).GetSafeNormal();
+
+		if (!AimDirection.IsNearlyZero())
+		{
+			return AimDirection.Rotation();
+		}
+	}
+
+	return GetActorForwardVector().Rotation();
 }
