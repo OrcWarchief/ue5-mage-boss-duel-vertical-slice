@@ -1,5 +1,6 @@
 #include "Characters/Boss/MageBossCharacter.h"
 #include "Projectiles/FireballProjectile.h"
+#include "Projectiles/DelayedRuneProjectile.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -14,9 +15,22 @@ AMageBossCharacter::AMageBossCharacter()
 
 	if (USkeletalMeshComponent* MeshComp = GetMesh())
 	{
-		MeshComp->VisibilityBasedAnimTickOption =
-			EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+		MeshComp->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	}
+
+	RuneHitPayload.Damage = 12.0f;
+	RuneHitPayload.PoiseDamage = 25.0f;
+	RuneHitPayload.ReactionType = EHitReactionType::LightStagger;
+	RuneHitPayload.bCanInterrupt = true;
+	RuneHitPayload.bForceReaction = false;
+	RuneHitPayload.bIgnorePoise = false;
+
+	FinalRuneHitPayload.Damage = 18.0f;
+	FinalRuneHitPayload.PoiseDamage = 45.0f;
+	FinalRuneHitPayload.ReactionType = EHitReactionType::HeavyStagger;
+	FinalRuneHitPayload.bCanInterrupt = true;
+	FinalRuneHitPayload.bForceReaction = false;
+	FinalRuneHitPayload.bIgnorePoise = false;
 }
 
 // ===== Target =====
@@ -166,6 +180,192 @@ void AMageBossCharacter::LaunchFireball()
 		SpawnRotation,
 		SpawnParams
 	);
+}
+
+bool AMageBossCharacter::CanStartRuneVolley() const
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	if (IsTeleporting())
+	{
+		return false;
+	}
+
+	if (IsCastingFireball())
+	{
+		return false;
+	}
+
+	if (ActiveRuneVolleyMontage != nullptr)
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	if ((World->GetTimeSeconds() - LastRuneVolleyTime) < RuneVolleyCooldown)
+	{
+		return false;
+	}
+
+	if (!RuneVolleyMontage)
+	{
+		return false;
+	}
+
+	if (!RuneProjectileClass)
+	{
+		return false;
+	}
+
+	if (RuneProjectileCount <= 0)
+	{
+		return false;
+	}
+
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp || !MeshComp->GetAnimInstance())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool AMageBossCharacter::TryStartRuneVolley()
+{
+	if (!CanStartRuneVolley())
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		return false;
+	}
+
+	ActiveRuneVolleyMontage = RuneVolleyMontage;
+	bRuneVolleySpawned = false;
+
+	SetCharacterState(ECharacterState::Attacking);
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->DisableMovement();
+	}
+
+	if (IsValid(CurrentCombatTarget.Get()))
+	{
+		FaceWorldDirection(GetLockOnBasisForward());
+	}
+
+	const float PlayLength = AnimInstance->Montage_Play(RuneVolleyMontage, 1.0f);
+	if (PlayLength <= 0.0f)
+	{
+		CancelRuneVolley(false, true);
+		return false;
+	}
+
+	FOnMontageEnded MontageEndDelegate;
+	MontageEndDelegate.BindUObject(this, &AMageBossCharacter::OnRuneVolleyMontageEnded);
+
+	AnimInstance->Montage_SetEndDelegate(MontageEndDelegate, RuneVolleyMontage);
+
+	if (UWorld* World = GetWorld())
+	{
+		LastRuneVolleyTime = World->GetTimeSeconds();
+	}
+
+	return true;
+}
+
+void AMageBossCharacter::SpawnRuneVolley()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (!ActiveRuneVolleyMontage)
+	{
+		return;
+	}
+
+	if (bRuneVolleySpawned)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || !RuneProjectileClass)
+	{
+		return;
+	}
+
+	bRuneVolleySpawned = true;
+
+	const int32 Count = FMath::Max(1, RuneProjectileCount);
+
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector SpawnLocation = GetRuneSpawnLocation(Index, Count);
+		const FRotator SpawnRotation = GetRuneSpawnRotation(SpawnLocation);
+
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.Instigator = this;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+		ADelayedRuneProjectile* RuneProjectile =
+			World->SpawnActor<ADelayedRuneProjectile>(
+				RuneProjectileClass,
+				SpawnLocation,
+				SpawnRotation,
+				SpawnParams
+			);
+
+		if (!RuneProjectile)
+		{
+			continue;
+		}
+
+		const bool bIsFinalRune = Index == Count - 1;
+
+		if (bUseFinalRunePayload && bIsFinalRune)
+		{
+			RuneProjectile->SetHitPayload(FinalRuneHitPayload);
+		}
+		else
+		{
+			RuneProjectile->SetHitPayload(RuneHitPayload);
+		}
+
+		const float ActivationDelay = RuneInitialActivationDelay + RuneActivationInterval * static_cast<float>(Index);
+
+		const float AimYawOffset = GetRuneAimYawOffset(Index, Count);
+
+		RuneProjectile->InitializeRune(
+			this,
+			CurrentCombatTarget.Get(),
+			ActivationDelay,
+			AimYawOffset
+		);
+	}
 }
 
 bool AMageBossCharacter::IsLockOnActive() const
@@ -339,6 +539,11 @@ void AMageBossCharacter::OnHitReaction_Implementation()
 		CancelFireball(true, false);
 	}
 
+	if (IsCastingRuneVolley())
+	{
+		CancelRuneVolley(true, false);
+	}
+
 	Super::OnHitReaction_Implementation();
 }
 
@@ -352,6 +557,11 @@ void AMageBossCharacter::Die_Implementation()
 	if (IsCastingFireball())
 	{
 		CancelFireball(true, false);
+	}
+
+	if (IsCastingRuneVolley())
+	{
+		CancelRuneVolley(true, false);
 	}
 
 	Super::Die_Implementation();
@@ -1023,4 +1233,123 @@ FRotator AMageBossCharacter::GetFireballAimRotation(const FVector& SpawnLocation
 	}
 
 	return GetActorForwardVector().Rotation();
+}
+
+void AMageBossCharacter::EndRuneVolley()
+{
+	ActiveRuneVolleyMontage = nullptr;
+	bRuneVolleySpawned = false;
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::CancelRuneVolley(bool bStopMontage, bool bRestoreNeutralState)
+{
+	UAnimMontage* MontageToStop = ActiveRuneVolleyMontage.Get();
+
+	ActiveRuneVolleyMontage = nullptr;
+	bRuneVolleySpawned = false;
+
+	if (bStopMontage && MontageToStop)
+	{
+		if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+		{
+			if (AnimInstance->Montage_IsPlaying(MontageToStop))
+			{
+				AnimInstance->Montage_Stop(0.05f, MontageToStop);
+			}
+		}
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (bRestoreNeutralState && IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::OnRuneVolleyMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != ActiveRuneVolleyMontage.Get())
+	{
+		return;
+	}
+
+	EndRuneVolley();
+}
+
+FVector AMageBossCharacter::GetRuneSpawnLocation(int32 RuneIndex, int32 RuneCount) const
+{
+	const FVector Forward = GetLockOnBasisForward();
+	const FVector Right = GetLockOnBasisRight();
+
+	const float Center = (static_cast<float>(RuneCount) - 1.0f) * 0.5f;
+	const float SideOffset = (static_cast<float>(RuneIndex) - Center) * RuneSpawnSideSpacing;
+
+	const float HeightStagger =
+		(RuneIndex % 2 == 0)
+		? 0.0f
+		: RuneSpawnHeightStagger;
+
+	return GetActorLocation()
+		- Forward * RuneSpawnBackOffset
+		+ Right * SideOffset
+		+ FVector::UpVector * (RuneSpawnHeight + HeightStagger);
+}
+
+FRotator AMageBossCharacter::GetRuneSpawnRotation(const FVector& SpawnLocation) const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+
+	if (IsValid(Target))
+	{
+		FVector ToTarget = Target->GetActorLocation() - SpawnLocation;
+		ToTarget.Z += 60.f;
+
+		if (!ToTarget.IsNearlyZero())
+		{
+			return ToTarget.Rotation();
+		}
+	}
+
+	return GetActorRotation();
+}
+
+float AMageBossCharacter::GetRuneAimYawOffset(int32 RuneIndex, int32 RuneCount) const
+{
+	if (RuneCount <= 1 || FMath::IsNearlyZero(RuneAimYawSpreadDegrees))
+	{
+		return 0.0f;
+	}
+
+	const float Center = (static_cast<float>(RuneCount) - 1.0f) * 0.5f;
+	const float NormalizedIndex = static_cast<float>(RuneIndex) - Center;
+
+	return NormalizedIndex * RuneAimYawSpreadDegrees;
 }

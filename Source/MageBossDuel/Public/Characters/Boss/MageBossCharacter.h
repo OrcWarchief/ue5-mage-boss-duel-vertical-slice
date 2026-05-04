@@ -7,6 +7,7 @@
 
 class UAnimMontage;
 class AFireballProjectile;
+class ADelayedRuneProjectile;
 
 UENUM(BlueprintType)
 enum class ETeleportPhase : uint8
@@ -113,6 +114,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Skill|Fireball")
 	bool IsCastingFireball() const { return ActiveFireballMontage != nullptr; }
 
+	// ===== Rune Volley =====
+
+	UFUNCTION(BlueprintPure, Category = "Skill|RuneVolly")
+	bool CanStartRuneVolley() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Skill|RuneVolley")
+	bool TryStartRuneVolley();
+
+	/** AnimNotify에서 호출 */
+	UFUNCTION(BlueprintCallable, Category = "Skill|RuneVolley|AnimNotify")
+	void SpawnRuneVolley();
+
+	UFUNCTION(BlueprintPure, Category = "Skill|RuneVolley")
+	bool IsCastingRuneVolley() const { return ActiveRuneVolleyMontage != nullptr; }
+
 protected:
 	// ===== BaseCharacter hooks =====
 
@@ -216,18 +232,63 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|Fireball|Runtime")
 	float LastFireballTime = -9999.0f;
 
+	// ===== Rune Volley Anim =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley|Anim")
+	TObjectPtr<UAnimMontage> RuneVolleyMontage = nullptr;
+
+	// ===== Rune Volley Projectile =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley")
+	TSubclassOf<ADelayedRuneProjectile> RuneProjectileClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley|Hit")
+	FHitPayload RuneHitPayload;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley|Hit")
+	FHitPayload FinalRuneHitPayload;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley|Hit")
+	bool bUseFinalRunePayload = true;
+
+	// ===== Rune Volley Tuning =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley", meta = (ClampMin = "1", UIMin = "1"))
+	int32 RuneProjectileCount = 5;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float RuneVolleyCooldown = 7.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float RuneInitialActivationDelay = 0.75f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float RuneActivationInterval = 0.18f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float RuneSpawnHeight = 180.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float RuneSpawnBackOffset = 120.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float RuneSpawnSideSpacing = 85.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float RuneSpawnHeightStagger = 25.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RuneVolley", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "deg"))
+	float RuneAimYawSpreadDegrees = 2.5f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|RuneVolley|Runtime")
+	float LastRuneVolleyTime = -9999.0f;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> ActiveTeleportMontage = nullptr;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UAnimMontage> ActiveFireballMontage = nullptr;
-
-	UPROPERTY(Transient)
 	ETeleportMontageStage ActiveTeleportMontageStage = ETeleportMontageStage::None;
-
-	UPROPERTY(Transient)
-	bool bFireballLaunched = false;
 
 	EDodgeDirection ChooseTeleportDirectionForAI() const;
 	bool HasAnyValidTeleportMontagePair() const;
@@ -258,9 +319,28 @@ private:
 	void FreezeMovementForTeleport();
 	void RestoreMovementAfterTeleport();
 
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> ActiveFireballMontage = nullptr;
+
+	UPROPERTY(Transient)
+	bool bFireballLaunched = false;
+
 	void EndFireball();
 	void CancelFireball(bool bStopMontage, bool bRestoreNeutralState);
 	void OnFireballMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	FVector GetFireballSpawnLocation() const;
 	FRotator GetFireballAimRotation(const FVector& SpawnLocation) const;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> ActiveRuneVolleyMontage = nullptr;
+
+	UPROPERTY(Transient)
+	bool bRuneVolleySpawned = false;
+
+	void EndRuneVolley();
+	void CancelRuneVolley(bool bStopMontage, bool bRestoreNeutralState);
+	void OnRuneVolleyMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	FVector GetRuneSpawnLocation(int32 RuneIndex, int32 RuneCount) const;
+	FRotator GetRuneSpawnRotation(const FVector& SpawnLocation) const;
+	float GetRuneAimYawOffset(int32 RuneIndex, int32 RuneCount) const;
 };
