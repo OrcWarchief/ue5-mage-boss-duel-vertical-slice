@@ -1,6 +1,7 @@
 #include "Characters/Boss/MageBossCharacter.h"
 #include "Projectiles/FireballProjectile.h"
 #include "Projectiles/DelayedRuneProjectile.h"
+#include "Skills/RunePrisonSkillActor.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -368,6 +369,193 @@ void AMageBossCharacter::SpawnRuneVolley()
 	}
 }
 
+bool AMageBossCharacter::CanStartRunePrison() const
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	if (IsTeleporting())
+	{
+		return false;
+	}
+
+	if (IsCastingFireball())
+	{
+		return false;
+	}
+
+	if (IsCastingRuneVolley())
+	{
+		return false;
+	}
+
+	if (IsCastingRunePrison())
+	{
+		return false;
+	}
+
+	if (IsRunePrisonPatternActive())
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	if ((World->GetTimeSeconds() - LastRunePrisonTime) < RunePrisonCooldown)
+	{
+		return false;
+	}
+
+	if (!RunePrisonMontage)
+	{
+		return false;
+	}
+
+	if (!RunePrisonActorClass)
+	{
+		return false;
+	}
+
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp || !MeshComp->GetAnimInstance())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool AMageBossCharacter::TryStartRunePrison()
+{
+	if (!CanStartRunePrison())
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		return false;
+	}
+
+	ActiveRunePrisonMontage = RunePrisonMontage;
+	bRunePrisonSpawned = false;
+
+	SetCharacterState(ECharacterState::Attacking);
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->DisableMovement();
+	}
+
+	if (IsValid(CurrentCombatTarget.Get()))
+	{
+		FaceWorldDirection(GetLockOnBasisForward());
+	}
+
+	const float PlayLength = AnimInstance->Montage_Play(RunePrisonMontage, 1.0f);
+	if (PlayLength <= 0.0f)
+	{
+		CancelRunePrison(false, true);
+		return false;
+	}
+
+	FOnMontageEnded MontageEndedDelegate;
+	MontageEndedDelegate.BindUObject(
+		this,
+		&AMageBossCharacter::OnRunePrisonMontageEnded
+	);
+
+	AnimInstance->Montage_SetEndDelegate(
+		MontageEndedDelegate,
+		RunePrisonMontage
+	);
+
+	if (UWorld* World = GetWorld())
+	{
+		LastRunePrisonTime = World->GetTimeSeconds();
+	}
+
+	return true;
+}
+
+void AMageBossCharacter::SpawnRunePrison()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (!ActiveRunePrisonMontage)
+	{
+		return;
+	}
+
+	if (bRunePrisonSpawned)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || !RunePrisonActorClass)
+	{
+		return;
+	}
+
+	bRunePrisonSpawned = true;
+
+	const FVector PrisonCenter = GetRunePrisonCenterLocation();
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	ARunePrisonSkillActor* PrisonActor =
+		World->SpawnActor<ARunePrisonSkillActor>(
+			RunePrisonActorClass,
+			PrisonCenter,
+			FRotator::ZeroRotator,
+			SpawnParams
+		);
+
+	if (!PrisonActor)
+	{
+		return;
+	}
+
+	ActiveRunePrisonActor = PrisonActor;
+
+	PrisonActor->InitializePrison(
+		this,
+		CurrentCombatTarget.Get(),
+		PrisonCenter
+	);
+}
+
+bool AMageBossCharacter::IsCastingRunePrison() const
+{
+	return ActiveRunePrisonMontage != nullptr;
+}
+
+bool AMageBossCharacter::IsRunePrisonPatternActive() const
+{
+	return IsValid(ActiveRunePrisonActor.Get());
+}
+
 bool AMageBossCharacter::IsLockOnActive() const
 {
 	return IsValid(CurrentCombatTarget.Get());
@@ -544,6 +732,11 @@ void AMageBossCharacter::OnHitReaction_Implementation()
 		CancelRuneVolley(true, false);
 	}
 
+	if (IsCastingRunePrison())
+	{
+		CancelRunePrison(true, false);
+	}
+
 	Super::OnHitReaction_Implementation();
 }
 
@@ -562,6 +755,17 @@ void AMageBossCharacter::Die_Implementation()
 	if (IsCastingRuneVolley())
 	{
 		CancelRuneVolley(true, false);
+	}
+
+	if (IsCastingRunePrison())
+	{
+		CancelRunePrison(true, false);
+	}
+
+	if (IsValid(ActiveRunePrisonActor.Get()))
+	{
+		ActiveRunePrisonActor->Destroy();
+		ActiveRunePrisonActor = nullptr;
 	}
 
 	Super::Die_Implementation();
@@ -1352,4 +1556,85 @@ float AMageBossCharacter::GetRuneAimYawOffset(int32 RuneIndex, int32 RuneCount) 
 	const float NormalizedIndex = static_cast<float>(RuneIndex) - Center;
 
 	return NormalizedIndex * RuneAimYawSpreadDegrees;
+}
+
+void AMageBossCharacter::EndRunePrison()
+{
+	ActiveRunePrisonMontage = nullptr;
+	bRunePrisonSpawned = false;
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.0f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::CancelRunePrison(bool bStopMontage, bool bRestoreNeutralState)
+{
+	UAnimMontage* MontageToStop = ActiveRunePrisonMontage.Get();
+
+	ActiveRunePrisonMontage = nullptr;
+	bRunePrisonSpawned = false;
+
+	if (bStopMontage && MontageToStop)
+	{
+		if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+		{
+			if (AnimInstance->Montage_IsPlaying(MontageToStop))
+			{
+				AnimInstance->Montage_Stop(0.05f, MontageToStop);
+			}
+		}
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (bRestoreNeutralState && IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.0f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::OnRunePrisonMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != ActiveRunePrisonMontage.Get())
+	{
+		return;
+	}
+
+	EndRunePrison();
+}
+
+FVector AMageBossCharacter::GetRunePrisonCenterLocation() const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+
+	if (IsValid(Target))
+	{
+		return Target->GetActorLocation();
+	}
+
+	return GetActorLocation() + GetActorForwardVector() * RunePrisonFallbackForwardDistance;
 }

@@ -8,6 +8,7 @@
 class UAnimMontage;
 class AFireballProjectile;
 class ADelayedRuneProjectile;
+class ARunePrisonSkillActor;
 
 UENUM(BlueprintType)
 enum class ETeleportPhase : uint8
@@ -128,6 +129,24 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Skill|RuneVolley")
 	bool IsCastingRuneVolley() const { return ActiveRuneVolleyMontage != nullptr; }
+
+	// ===== Rune Prison =====
+
+	UFUNCTION(BlueprintPure, Category = "Skill|RunePrison")
+	bool CanStartRunePrison() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Skill|RunePrison")
+	bool TryStartRunePrison();
+
+	/** AnimNotify에서 호출 */
+	UFUNCTION(BlueprintCallable, Category = "Skill|RunePrison|AnimNotify")
+	void SpawnRunePrison();
+
+	UFUNCTION(BlueprintPure, Category = "Skill|RunePrison")
+	bool IsCastingRunePrison() const;
+
+	UFUNCTION(BlueprintPure, Category = "Skill|RunePrison")
+	bool IsRunePrisonPatternActive() const;
 
 protected:
 	// ===== BaseCharacter hooks =====
@@ -283,6 +302,25 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|RuneVolley|Runtime")
 	float LastRuneVolleyTime = -9999.0f;
 
+	// ===== Rune Prison Anim =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Anim")
+	TObjectPtr<UAnimMontage> RunePrisonMontage = nullptr;
+
+	// ===== Rune Prison Actor =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison")
+	TSubclassOf<ARunePrisonSkillActor> RunePrisonActorClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float RunePrisonCooldown = 14.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison", meta = (Units = "cm"))
+	float RunePrisonFallbackForwardDistance = 550.0f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Runtime")
+	float LastRunePrisonTime = -9999.0f;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> ActiveTeleportMontage = nullptr;
@@ -343,4 +381,21 @@ private:
 	FVector GetRuneSpawnLocation(int32 RuneIndex, int32 RuneCount) const;
 	FRotator GetRuneSpawnRotation(const FVector& SpawnLocation) const;
 	float GetRuneAimYawOffset(int32 RuneIndex, int32 RuneCount) const;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> ActiveRunePrisonMontage = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ARunePrisonSkillActor> ActiveRunePrisonActor = nullptr;
+
+	UPROPERTY(Transient)
+	bool bRunePrisonSpawned = false;
+
+	void EndRunePrison();
+
+	void CancelRunePrison(bool bStopMontage, bool bRestoreNeutralState);
+
+	void OnRunePrisonMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+	FVector GetRunePrisonCenterLocation() const;
 };
