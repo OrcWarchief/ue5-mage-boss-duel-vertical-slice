@@ -53,6 +53,11 @@ namespace
 
 		return EDodgeDirection::ForwardLeft;
 	}
+
+	EHitReactionType MaxHitReaction(EHitReactionType A, EHitReactionType B)
+	{
+		return static_cast<uint8>(A) >= static_cast<uint8>(B) ? A : B;
+	}
 }
 
 ABaseCharacter::ABaseCharacter()
@@ -86,6 +91,8 @@ void ABaseCharacter::InitializeStats_Implementation()
 	// Health, Mana 초기화
 	CurrentHealth = MaxHealth;
 	CurrentMana = MaxMana;
+	CurrentPoise = MaxPoise;
+	CurrentHitReactionType = EHitReactionType::None;
 
 	// 전투/상태 초기화
 	bIsAttacking = false;
@@ -118,26 +125,84 @@ void ABaseCharacter::SetHealth(float NewHealth)
 	}
 }
 
-void ABaseCharacter::ApplyDamage(float DamageAmount, ABaseCharacter* DamageCauser) // Apply -> Recieve or Take Damage?
+void ABaseCharacter::ApplyDamage(const FHitPayload& HitPayload, ABaseCharacter* DamageCauser)
 {
+	if (!IsAlive())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DAMAGE-FAIL] Target already dead"));
+		return;
+	}
+
+	ApplyHitPayload(HitPayload, DamageCauser);
+}
+
+void ABaseCharacter::ApplyHitPayload(const FHitPayload& HitPayload, ABaseCharacter* DamageCauser)
+{
+	(void)DamageCauser; // TODO: distance/Knockback calculate
+
 	if (!IsAlive())
 	{
 		return;
 	}
 
-	if (DamageAmount <= 0.f)
+	const bool bHasDamage = HitPayload.Damage > 0.0f;
+	const bool bHasPoiseDamage = HitPayload.PoiseDamage > 0.0f;
+
+	if (!bHasDamage && !bHasPoiseDamage && !HitPayload.bForceReaction)
 	{
 		return;
 	}
 
-	// TODO : Defense/Poise 등 적용 
-	const float FinalDamage = DamageAmount;
+	// ===== Damage =====
 
-	const float NewHealth = CurrentHealth - FinalDamage;
-	SetHealth(NewHealth); // 내부에서 Clamp + Die 처리
-
-	if (IsAlive())
+	if (bHasDamage)
 	{
+		// TODO: Defense, 나중에 FinalDamage 계산식으로 확장
+		const float FinalDamage = HitPayload.Damage;
+		const float NewHealth = CurrentHealth - FinalDamage;
+
+		SetHealth(NewHealth);
+	}
+
+	// SetHealth에서 Dead로 바뀌었으면 HitReaction은 실행X
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	// ===== Poise =====
+
+	bool bPoiseBroken = false;
+
+	if (!HitPayload.bIgnorePoise && MaxPoise > 0.0f && bHasPoiseDamage)
+	{
+		CurrentPoise = FMath::Clamp(CurrentPoise - HitPayload.PoiseDamage, 0.0f, MaxPoise);
+		bPoiseBroken = CurrentPoise <= 0.0f;
+	}
+
+	// ===== Reaction Resolve =====
+
+	const EHitReactionType ResolvedReaction = ResolveHitReaction(HitPayload, bPoiseBroken);
+
+	if (bPoiseBroken)
+	{
+		// poise break -> 즉시 poise를 회복
+		// 한 번 깨진 뒤 영구적으로 계속 HeavyStagger가 나지 않음
+		CurrentPoise = MaxPoise;
+
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(PoiseRestoreTimerHandle);
+		}
+	}
+	else if (bHasPoiseDamage)
+	{
+		SchedulePoiseRestore();
+	}
+
+	if (ResolvedReaction != EHitReactionType::None)
+	{
+		CurrentHitReactionType = ResolvedReaction;
 		OnHitReaction();
 	}
 }
@@ -593,7 +658,10 @@ void ABaseCharacter::Die_Implementation()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
+		World->GetTimerManager().ClearTimer(PoiseRestoreTimerHandle);
 	}
+
+	CurrentHitReactionType = EHitReactionType::None;
 	SetCharacterState(ECharacterState::Dead);
 
 	// 이동 정지
@@ -614,24 +682,51 @@ void ABaseCharacter::Die_Implementation()
 
 void ABaseCharacter::OnHitReaction_Implementation()
 {
+	const EHitReactionType ReactionType =
+		CurrentHitReactionType == EHitReactionType::None
+		? EHitReactionType::LightStagger
+		: CurrentHitReactionType;
+
 	if (bIsAttacking && CanBeInterrupted())
 	{
 		// 공격 강제 종료
 		EndBasicAttack();
 	}
 
-	SetCharacterState(ECharacterState::Hit);
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+	}
 
+	if (UAnimMontage* HitMontage = GetHitReactionMontage(ReactionType))
+	{
+		if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+		{
+			AnimInstance->Montage_Play(HitMontage, 1.0f);
+		}
+	}
+
+	SetCharacterState(ECharacterState::Hit);
+	
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
-		if (HitRecoveryDuration <= 0.f)
+
+		const float RecoveryDuration = GetHitRecoveryDuration(ReactionType);
+
+		if (RecoveryDuration <= 0.0f)
 		{
 			OnHitRecoveryTimerElapsed();
 		}
 		else
 		{
-			World->GetTimerManager().SetTimer(HitRecoveryTimerHandle, this, &ThisClass::OnHitRecoveryTimerElapsed, HitRecoveryDuration, false);
+			World->GetTimerManager().SetTimer(
+				HitRecoveryTimerHandle,
+				this,
+				&ThisClass::OnHitRecoveryTimerElapsed,
+				RecoveryDuration,
+				false
+			);
 		}
 	}
 }
@@ -648,6 +743,7 @@ void ABaseCharacter::OnHitRecoveryTimerElapsed()
 		return;
 	}
 
+	CurrentHitReactionType = EHitReactionType::None;
 	SetCharacterState(GetVelocity().Size2D() > 3.f ? ECharacterState::Moving : ECharacterState::Idle);
 }
 
@@ -757,6 +853,98 @@ void ABaseCharacter::BroadcastManaChanged()
 {
 	const float Percent = MaxMana > 0.f ? CurrentMana / MaxMana : 0.f;
 	OnManaChanged.Broadcast(CurrentMana, MaxMana, Percent);
+}
+
+EHitReactionType ABaseCharacter::ResolveHitReaction(const FHitPayload& HitPayload, bool bPoiseBroken) const
+{
+	if (HitPayload.bForceReaction)
+	{
+		return HitPayload.ReactionType;
+	}
+
+	if (bPoiseBroken)
+	{
+		return MaxHitReaction(HitPayload.ReactionType, EHitReactionType::HeavyStagger);
+	}
+
+	if (HitPayload.bCanInterrupt && CanBeInterrupted())
+	{
+		return HitPayload.ReactionType;
+	}
+
+	return EHitReactionType::None;
+}
+
+float ABaseCharacter::GetHitRecoveryDuration(EHitReactionType ReactionType) const
+{
+	switch (ReactionType)
+	{
+	case EHitReactionType::LightStagger:
+		return HitRecoveryDuration;
+	case EHitReactionType::HeavyStagger:
+		return HeavyHitRecoveryDuration;
+	case EHitReactionType::Knockdown:
+		return KnockdownRecoveryDuration;
+	case EHitReactionType::None:
+	default:
+		return 0.0f;
+	}
+}
+
+UAnimMontage* ABaseCharacter::GetHitReactionMontage(EHitReactionType ReactionType) const
+{
+	switch (ReactionType)
+	{
+	case EHitReactionType::LightStagger:
+		return LightHitReactionMontage.Get();
+	case EHitReactionType::HeavyStagger:
+		return HeavyHitReactionMontage.Get();
+	case EHitReactionType::Knockdown:
+		return KnockdownMontage.Get();
+	case EHitReactionType::None:
+	default:
+		return nullptr;
+	}
+}
+
+void ABaseCharacter::SchedulePoiseRestore()
+{
+	if (MaxPoise <= 0.0f)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	World->GetTimerManager().ClearTimer(PoiseRestoreTimerHandle);
+
+	if (PoiseRestoreDelay <= 0.0f)
+	{
+		RestorePoise();
+		return;
+	}
+
+	World->GetTimerManager().SetTimer(
+		PoiseRestoreTimerHandle,
+		this,
+		&ThisClass::RestorePoise,
+		PoiseRestoreDelay,
+		false
+	);
+}
+
+void ABaseCharacter::RestorePoise()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	CurrentPoise = MaxPoise;
 }
 
 bool ABaseCharacter::CanStartDodge() const

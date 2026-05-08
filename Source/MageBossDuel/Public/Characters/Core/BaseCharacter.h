@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Combat/HitTypes.h"
 #include "BaseCharacter.generated.h"
 
 // ===== Forward Decls =====
@@ -69,7 +70,22 @@ public:
     void SetHealth(float NewHealth);
 
     UFUNCTION(BlueprintCallable, Category = "Stats|Health")
-    void ApplyDamage(float DamageAmount, ABaseCharacter* DamageCauser);
+    void ApplyDamage(const FHitPayload& HitPayload, ABaseCharacter* DamageCauser);
+
+    UFUNCTION(BlueprintCallable, Category = "Stats|Health")
+    void ApplyHitPayload(const FHitPayload& HitPayload, ABaseCharacter* DamageCauser);
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Poise")
+    float GetCurrentPoise() const { return CurrentPoise; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Poise")
+    float GetMaxPoise() const { return MaxPoise; }
+
+    UFUNCTION(BlueprintPure, Category = "Stats|Poise")
+    float GetPoisePercent() const { return MaxPoise > 0.f ? CurrentPoise / MaxPoise : 0.f; }
+
+    UFUNCTION(BlueprintPure, Category = "Combat|Hit")
+    EHitReactionType GetCurrentHitReactionType() const { return CurrentHitReactionType; }
 
     UFUNCTION(BlueprintCallable, Category = "Stats|Health")
     void Heal(float HealAmount);
@@ -151,6 +167,9 @@ public:
     bool TryStartDodge(const FVector2D& MoveInput);
     bool IsDodging() const { return CurrentState == ECharacterState::Dodging; }
 
+    UFUNCTION(BlueprintPure, Category = "State")
+    ECharacterState GetCurrentState() const { return CurrentState; }
+
 protected:
     virtual void BeginPlay() override;
 
@@ -225,6 +244,16 @@ protected:
     bool TryConsumeMana(float Cost);
     void BroadcastHealthChanged();
     void BroadcastManaChanged();
+
+    EHitReactionType ResolveHitReaction(const FHitPayload& HitPayload, bool bPoiseBroken) const;
+
+    float GetHitRecoveryDuration(EHitReactionType ReactionType) const;
+
+    UAnimMontage* GetHitReactionMontage(EHitReactionType ReactionType) const;
+
+    void SchedulePoiseRestore();
+
+    void RestorePoise();
 
     // ===== Dodge =====
     /** 입력시 Forward Roll 몽타주 무입력시 Backstep 몽타주 */
@@ -333,8 +362,39 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Basic|Casting", meta = (ClampMin = "0.0", UIMin = "0.0"))
     float BasicAttackManaCost = 5.f;
 
+    // ===== Hit Reaction Tuning =====
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
     float HitRecoveryDuration = 0.35f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+    float HeavyHitRecoveryDuration = 0.65f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+    float KnockdownRecoveryDuration = 1.15f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit|Anim")
+    TObjectPtr<UAnimMontage> LightHitReactionMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit|Anim")
+    TObjectPtr<UAnimMontage> HeavyHitReactionMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit|Anim")
+    TObjectPtr<UAnimMontage> KnockdownMontage = nullptr;
+
+    // ===== Poise =====
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stats|Poise", meta = (ClampMin = "0.0", UIMin = "0.0"))
+    float MaxPoise = 100.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stats|Poise", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+    float PoiseRestoreDelay = 1.0f;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats|Poise")
+    float CurrentPoise = 100.0f;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Hit")
+    EHitReactionType CurrentHitReactionType = EHitReactionType::None;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Debug")
     bool bEnableCombatDebug = false;
@@ -393,9 +453,10 @@ private:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Runtime", meta = (AllowPrivateAccess = "true"))
     float LastAttackTime = -9999.f;
 
+    FTimerHandle HitRecoveryTimerHandle;
+    FTimerHandle PoiseRestoreTimerHandle;
+
     /** 현재 상태(상태 머신). */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
     ECharacterState CurrentState = ECharacterState::Idle;
-
-    FTimerHandle HitRecoveryTimerHandle;
 };

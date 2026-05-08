@@ -1,0 +1,1640 @@
+#include "Characters/Boss/MageBossCharacter.h"
+#include "Projectiles/FireballProjectile.h"
+#include "Projectiles/DelayedRuneProjectile.h"
+#include "Skills/RunePrisonSkillActor.h"
+
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/CharacterMovementComponent.h"
+
+AMageBossCharacter::AMageBossCharacter()
+{
+	PrimaryActorTick.bCanEverTick = false;
+
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		MeshComp->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	}
+
+	RuneHitPayload.Damage = 12.0f;
+	RuneHitPayload.PoiseDamage = 25.0f;
+	RuneHitPayload.ReactionType = EHitReactionType::LightStagger;
+	RuneHitPayload.bCanInterrupt = true;
+	RuneHitPayload.bForceReaction = false;
+	RuneHitPayload.bIgnorePoise = false;
+
+	FinalRuneHitPayload.Damage = 18.0f;
+	FinalRuneHitPayload.PoiseDamage = 45.0f;
+	FinalRuneHitPayload.ReactionType = EHitReactionType::HeavyStagger;
+	FinalRuneHitPayload.bCanInterrupt = true;
+	FinalRuneHitPayload.bForceReaction = false;
+	FinalRuneHitPayload.bIgnorePoise = false;
+}
+
+// ===== Target =====
+
+void AMageBossCharacter::SetCombatTarget(AActor* NewTarget)
+{
+	CurrentCombatTarget = (IsValid(NewTarget) && NewTarget != this) ? NewTarget : nullptr;
+}
+
+bool AMageBossCharacter::CanStartFireball() const
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	if (IsTeleporting())
+	{
+		return false;
+	}
+
+	if (ActiveFireballMontage != nullptr)
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	if ((World->GetTimeSeconds() - LastFireballTime) < FireballCooldown)
+	{
+		return false;
+	}
+
+	if (!FireballMontage)
+	{
+		return false;
+	}
+
+	if (!FireballProjectileClass)
+	{
+		return false;
+	}
+
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp || !MeshComp->GetAnimInstance())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool AMageBossCharacter::TryStartFireball()
+{
+	if (!CanStartFireball())
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		return false;
+	}
+
+	ActiveFireballMontage = FireballMontage;
+	bFireballLaunched = false;
+	
+	SetCharacterState(ECharacterState::Attacking);
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->DisableMovement();
+	}
+
+	if (IsValid(CurrentCombatTarget.Get()))
+	{
+		FaceWorldDirection(GetLockOnBasisForward());
+	}
+
+	const float PlayLength = AnimInstance->Montage_Play(FireballMontage, 1.0f);
+	if (PlayLength <= 0.f)
+	{
+		CancelFireball(false, true);
+	}
+	
+	FOnMontageEnded MontageEndDelegate;
+	MontageEndDelegate.BindUObject(this, &AMageBossCharacter::OnFireballMontageEnded);
+
+	AnimInstance->Montage_SetEndDelegate(MontageEndDelegate, FireballMontage);
+
+	if (UWorld* World = GetWorld())
+	{
+		LastFireballTime = World->GetTimeSeconds();
+	}
+
+	return true;
+}
+
+void AMageBossCharacter::LaunchFireball()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (!ActiveFireballMontage)
+	{
+		return;
+	}
+
+	if (bFireballLaunched)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || !FireballProjectileClass)
+	{
+		return;
+	}
+
+	bFireballLaunched = true;
+
+	const FVector SpawnLocation = GetFireballSpawnLocation();
+	const FRotator SpawnRotation = GetFireballAimRotation(SpawnLocation);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	World->SpawnActor<AFireballProjectile>(
+		FireballProjectileClass,
+		SpawnLocation,
+		SpawnRotation,
+		SpawnParams
+	);
+}
+
+bool AMageBossCharacter::CanStartRuneVolley() const
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	if (IsTeleporting())
+	{
+		return false;
+	}
+
+	if (IsCastingFireball())
+	{
+		return false;
+	}
+
+	if (ActiveRuneVolleyMontage != nullptr)
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	if ((World->GetTimeSeconds() - LastRuneVolleyTime) < RuneVolleyCooldown)
+	{
+		return false;
+	}
+
+	if (!RuneVolleyMontage)
+	{
+		return false;
+	}
+
+	if (!RuneProjectileClass)
+	{
+		return false;
+	}
+
+	if (RuneProjectileCount <= 0)
+	{
+		return false;
+	}
+
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp || !MeshComp->GetAnimInstance())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool AMageBossCharacter::TryStartRuneVolley()
+{
+	if (!CanStartRuneVolley())
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		return false;
+	}
+
+	ActiveRuneVolleyMontage = RuneVolleyMontage;
+	bRuneVolleySpawned = false;
+
+	SetCharacterState(ECharacterState::Attacking);
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->DisableMovement();
+	}
+
+	if (IsValid(CurrentCombatTarget.Get()))
+	{
+		FaceWorldDirection(GetLockOnBasisForward());
+	}
+
+	const float PlayLength = AnimInstance->Montage_Play(RuneVolleyMontage, 1.0f);
+	if (PlayLength <= 0.0f)
+	{
+		CancelRuneVolley(false, true);
+		return false;
+	}
+
+	FOnMontageEnded MontageEndDelegate;
+	MontageEndDelegate.BindUObject(this, &AMageBossCharacter::OnRuneVolleyMontageEnded);
+
+	AnimInstance->Montage_SetEndDelegate(MontageEndDelegate, RuneVolleyMontage);
+
+	if (UWorld* World = GetWorld())
+	{
+		LastRuneVolleyTime = World->GetTimeSeconds();
+	}
+
+	return true;
+}
+
+void AMageBossCharacter::SpawnRuneVolley()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (!ActiveRuneVolleyMontage)
+	{
+		return;
+	}
+
+	if (bRuneVolleySpawned)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || !RuneProjectileClass)
+	{
+		return;
+	}
+
+	bRuneVolleySpawned = true;
+
+	const int32 Count = FMath::Max(1, RuneProjectileCount);
+
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector SpawnLocation = GetRuneSpawnLocation(Index, Count);
+		const FRotator SpawnRotation = GetRuneSpawnRotation(SpawnLocation);
+
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.Instigator = this;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+		ADelayedRuneProjectile* RuneProjectile =
+			World->SpawnActor<ADelayedRuneProjectile>(
+				RuneProjectileClass,
+				SpawnLocation,
+				SpawnRotation,
+				SpawnParams
+			);
+
+		if (!RuneProjectile)
+		{
+			continue;
+		}
+
+		const bool bIsFinalRune = Index == Count - 1;
+
+		if (bUseFinalRunePayload && bIsFinalRune)
+		{
+			RuneProjectile->SetHitPayload(FinalRuneHitPayload);
+		}
+		else
+		{
+			RuneProjectile->SetHitPayload(RuneHitPayload);
+		}
+
+		const float ActivationDelay = RuneInitialActivationDelay + RuneActivationInterval * static_cast<float>(Index);
+
+		const float AimYawOffset = GetRuneAimYawOffset(Index, Count);
+
+		RuneProjectile->InitializeRune(
+			this,
+			CurrentCombatTarget.Get(),
+			ActivationDelay,
+			AimYawOffset
+		);
+	}
+}
+
+bool AMageBossCharacter::CanStartRunePrison() const
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	if (IsTeleporting())
+	{
+		return false;
+	}
+
+	if (IsCastingFireball())
+	{
+		return false;
+	}
+
+	if (IsCastingRuneVolley())
+	{
+		return false;
+	}
+
+	if (IsCastingRunePrison())
+	{
+		return false;
+	}
+
+	if (IsRunePrisonPatternActive())
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	if ((World->GetTimeSeconds() - LastRunePrisonTime) < RunePrisonCooldown)
+	{
+		return false;
+	}
+
+	if (!RunePrisonMontage)
+	{
+		return false;
+	}
+
+	if (!RunePrisonActorClass)
+	{
+		return false;
+	}
+
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp || !MeshComp->GetAnimInstance())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool AMageBossCharacter::TryStartRunePrison()
+{
+	if (!CanStartRunePrison())
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		return false;
+	}
+
+	ActiveRunePrisonMontage = RunePrisonMontage;
+	bRunePrisonSpawned = false;
+
+	SetCharacterState(ECharacterState::Attacking);
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->DisableMovement();
+	}
+
+	if (IsValid(CurrentCombatTarget.Get()))
+	{
+		FaceWorldDirection(GetLockOnBasisForward());
+	}
+
+	const float PlayLength = AnimInstance->Montage_Play(RunePrisonMontage, 1.0f);
+	if (PlayLength <= 0.0f)
+	{
+		CancelRunePrison(false, true);
+		return false;
+	}
+
+	FOnMontageEnded MontageEndedDelegate;
+	MontageEndedDelegate.BindUObject(
+		this,
+		&AMageBossCharacter::OnRunePrisonMontageEnded
+	);
+
+	AnimInstance->Montage_SetEndDelegate(
+		MontageEndedDelegate,
+		RunePrisonMontage
+	);
+
+	if (UWorld* World = GetWorld())
+	{
+		LastRunePrisonTime = World->GetTimeSeconds();
+	}
+
+	return true;
+}
+
+void AMageBossCharacter::SpawnRunePrison()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (!ActiveRunePrisonMontage)
+	{
+		return;
+	}
+
+	if (bRunePrisonSpawned)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || !RunePrisonActorClass)
+	{
+		return;
+	}
+
+	bRunePrisonSpawned = true;
+
+	const FVector PrisonCenter = GetRunePrisonCenterLocation();
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	ARunePrisonSkillActor* PrisonActor =
+		World->SpawnActor<ARunePrisonSkillActor>(
+			RunePrisonActorClass,
+			PrisonCenter,
+			FRotator::ZeroRotator,
+			SpawnParams
+		);
+
+	if (!PrisonActor)
+	{
+		return;
+	}
+
+	ActiveRunePrisonActor = PrisonActor;
+
+	PrisonActor->InitializePrison(
+		this,
+		CurrentCombatTarget.Get(),
+		PrisonCenter
+	);
+}
+
+bool AMageBossCharacter::IsCastingRunePrison() const
+{
+	return ActiveRunePrisonMontage != nullptr;
+}
+
+bool AMageBossCharacter::IsRunePrisonPatternActive() const
+{
+	return IsValid(ActiveRunePrisonActor.Get());
+}
+
+bool AMageBossCharacter::IsLockOnActive() const
+{
+	return IsValid(CurrentCombatTarget.Get());
+}
+
+AActor* AMageBossCharacter::GetCurrentLockOnTarget() const
+{
+	return CurrentCombatTarget.Get();
+}
+
+AActor* AMageBossCharacter::GetLockOnTargetActor_Implementation() const
+{
+	return CurrentCombatTarget.Get();
+}
+
+// ===== Teleport Public =====
+
+bool AMageBossCharacter::CanStartTeleport(EDodgeDirection RequestedDirection) const
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	if (TeleportRuntime.Phase != ETeleportPhase::None)
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	if ((World->GetTimeSeconds() - LastTeleportTime) < TeleportCooldown)
+	{
+		return false;
+	}
+
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp || !MeshComp->GetAnimInstance())
+	{
+		return false;
+	}
+
+	const EDodgeDirection Direction =
+		RequestedDirection == EDodgeDirection::None
+		? ChooseTeleportDirectionForAI()
+		: RequestedDirection;
+
+	if (Direction == EDodgeDirection::None)
+	{
+		return false;
+	}
+
+	if (!HasAnyValidTeleportMontagePair())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool AMageBossCharacter::TryStartTeleport(EDodgeDirection RequestedDirection)
+{
+	const EDodgeDirection InitialDirection =
+		RequestedDirection == EDodgeDirection::None
+		? ChooseTeleportDirectionForAI()
+		: RequestedDirection;
+
+	if (!CanStartTeleport(InitialDirection))
+	{
+		return false;
+	}
+
+	FVector Destination = FVector::ZeroVector;
+	EDodgeDirection ResolvedDirection = EDodgeDirection::None;
+
+	if (!FindTeleportDestination(InitialDirection, Destination, ResolvedDirection))
+	{
+		return false;
+	}
+
+	const int32 MontagePairIndex = ChooseTeleportMontagePairIndex();
+	if (MontagePairIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	UAnimMontage* BeginMontage = GetTeleportBeginMontage(MontagePairIndex);
+	if (!BeginMontage)
+	{
+		return false;
+	}
+
+	BeginTeleport(BeginMontage, ResolvedDirection, Destination, MontagePairIndex);
+	return true;
+}
+
+void AMageBossCharacter::ExecuteTeleport()
+{
+	if (TeleportRuntime.Phase != ETeleportPhase::Startup)
+	{
+		return;
+	}
+
+	if (!IsAlive())
+	{
+		CancelTeleport(false, false);
+		return;
+	}
+
+	TeleportRuntime.Phase = ETeleportPhase::Hidden;
+	SetTeleportHiddenState(true);
+
+	const FRotator NewRotation = bFaceTargetOnReappear
+		? MakeFacingRotationAtLocation(TeleportRuntime.Destination)
+		: GetActorRotation();
+
+	// 목적지 검사는 FindTeleportDestination에서 끝남, bNoCheck=true.
+	// 실패 시 숨김/충돌/이동 상태를 즉시 복구
+	const bool bTeleported = TeleportTo(
+		TeleportRuntime.Destination,
+		NewRotation,
+		false,
+		true
+	);
+
+	if (!bTeleported)
+	{
+		CancelTeleport(true, true);
+	}
+}
+
+void AMageBossCharacter::ReappearTeleport()
+{
+	if (TeleportRuntime.Phase != ETeleportPhase::Hidden)
+	{
+		return;
+	}
+
+	TeleportRuntime.Phase = ETeleportPhase::Recovery;
+	SetTeleportHiddenState(false);
+
+	if (bFaceTargetOnReappear)
+	{
+		SetActorRotation(MakeFacingRotationAtLocation(GetActorLocation()));
+	}
+}
+
+// ===== BaseCharacter Hooks =====
+
+void AMageBossCharacter::OnHitReaction_Implementation()
+{
+	if (IsTeleporting())
+	{
+		CancelTeleport(false, true);
+	}
+
+	if (IsCastingFireball())
+	{
+		CancelFireball(true, false);
+	}
+
+	if (IsCastingRuneVolley())
+	{
+		CancelRuneVolley(true, false);
+	}
+
+	if (IsCastingRunePrison())
+	{
+		CancelRunePrison(true, false);
+	}
+
+	Super::OnHitReaction_Implementation();
+}
+
+void AMageBossCharacter::Die_Implementation()
+{
+	if (IsTeleporting())
+	{
+		CancelTeleport(false, false);
+	}
+
+	if (IsCastingFireball())
+	{
+		CancelFireball(true, false);
+	}
+
+	if (IsCastingRuneVolley())
+	{
+		CancelRuneVolley(true, false);
+	}
+
+	if (IsCastingRunePrison())
+	{
+		CancelRunePrison(true, false);
+	}
+
+	if (IsValid(ActiveRunePrisonActor.Get()))
+	{
+		ActiveRunePrisonActor->Destroy();
+		ActiveRunePrisonActor = nullptr;
+	}
+
+	Super::Die_Implementation();
+}
+
+// ===== Teleport Flow =====
+
+void AMageBossCharacter::BeginTeleport(
+	UAnimMontage* BeginMontage,
+	EDodgeDirection Direction,
+	const FVector& Destination,
+	int32 MontagePairIndex
+)
+{
+	if (!BeginMontage)
+	{
+		return;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		return;
+	}
+
+	TeleportRuntime.Direction = Direction;
+	TeleportRuntime.Phase = ETeleportPhase::Startup;
+	TeleportRuntime.Destination = Destination;
+	TeleportRuntime.MontagePairIndex = MontagePairIndex;
+	TeleportRuntime.bMeshHidden = false;
+
+	ActiveTeleportMontage = BeginMontage;
+	ActiveTeleportMontageStage = ETeleportMontageStage::Begin;
+
+	SetCharacterState(ECharacterState::Attacking);
+	FreezeMovementForTeleport();
+
+	if (bFaceTargetOnTeleportStart)
+	{
+		FaceWorldDirection(GetLockOnBasisForward());
+	}
+
+	const float PlayLength = AnimInstance->Montage_Play(BeginMontage);
+	if (PlayLength <= 0.0f)
+	{
+		CancelTeleport(true, true);
+		return;
+	}
+
+	FOnMontageEnded MontageEndedDelegate;
+	MontageEndedDelegate.BindUObject(this, &AMageBossCharacter::OnTeleportBeginMontageEnded);
+	AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, BeginMontage);
+
+	if (UWorld* World = GetWorld())
+	{
+		LastTeleportTime = World->GetTimeSeconds();
+	}
+
+	LastTeleportDirection = Direction;
+	LastTeleportMontagePairIndex = MontagePairIndex;
+}
+
+void AMageBossCharacter::EndTeleport()
+{
+	if (!IsTeleporting())
+	{
+		return;
+	}
+
+	SetTeleportHiddenState(false);
+
+	TeleportRuntime = FTeleportRuntime();
+	ActiveTeleportMontage = nullptr;
+	ActiveTeleportMontageStage = ETeleportMontageStage::None;
+
+	RestoreMovementAfterTeleport();
+
+	if (IsAlive())
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.0f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::CancelTeleport(bool bRestoreNeutralState, bool bRestoreMovement)
+{
+	const bool bHadTeleportState =
+		TeleportRuntime.Phase != ETeleportPhase::None ||
+		TeleportRuntime.bMeshHidden ||
+		ActiveTeleportMontage != nullptr;
+
+	if (!bHadTeleportState)
+	{
+		return;
+	}
+
+	UAnimMontage* MontageToStop = ActiveTeleportMontage.Get();
+
+	SetTeleportHiddenState(false);
+
+	TeleportRuntime = FTeleportRuntime();
+	ActiveTeleportMontage = nullptr;
+	ActiveTeleportMontageStage = ETeleportMontageStage::None;
+
+	if (bRestoreMovement)
+	{
+		RestoreMovementAfterTeleport();
+	}
+
+	if (bRestoreNeutralState && IsAlive())
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.0f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+
+	if (MontageToStop)
+	{
+		if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+		{
+			if (AnimInstance->Montage_IsPlaying(MontageToStop))
+			{
+				AnimInstance->Montage_Stop(0.05f, MontageToStop);
+			}
+		}
+	}
+}
+
+void AMageBossCharacter::PlayTeleportEndMontage()
+{
+	if (TeleportRuntime.Phase != ETeleportPhase::Hidden)
+	{
+		CancelTeleport(true, true);
+		return;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		ReappearTeleport();
+		EndTeleport();
+		return;
+	}
+
+	UAnimMontage* EndMontage = GetTeleportEndMontage(TeleportRuntime.MontagePairIndex);
+	if (!EndMontage)
+	{
+		ReappearTeleport();
+		EndTeleport();
+		return;
+	}
+
+	ActiveTeleportMontage = EndMontage;
+	ActiveTeleportMontageStage = ETeleportMontageStage::End;
+
+	const float PlayLength = AnimInstance->Montage_Play(EndMontage);
+	if (PlayLength <= 0.0f)
+	{
+		ReappearTeleport();
+		EndTeleport();
+		return;
+	}
+
+	FOnMontageEnded MontageEndedDelegate;
+	MontageEndedDelegate.BindUObject(
+		this,
+		&AMageBossCharacter::OnTeleportEndMontageEnded
+	);
+
+	AnimInstance->Montage_SetEndDelegate(MontageEndedDelegate, EndMontage);
+}
+
+// ===== Teleport Selection =====
+
+EDodgeDirection AMageBossCharacter::ChooseTeleportDirectionForAI() const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+
+	if (!IsValid(Target))
+	{
+		return EDodgeDirection::Backward;
+	}
+
+	const float DistanceToTarget = FVector::Dist2D(GetActorLocation(), Target->GetActorLocation());
+
+	TArray<EDodgeDirection> Options;
+
+	if (DistanceToTarget <= TeleportNearDistance)
+	{
+		Options = {
+			EDodgeDirection::Backward,
+			EDodgeDirection::BackwardLeft,
+			EDodgeDirection::BackwardRight
+		};
+	}
+	else if (DistanceToTarget >= TeleportFarDistance)
+	{
+		Options = {
+			EDodgeDirection::ForwardLeft,
+			EDodgeDirection::ForwardRight,
+			EDodgeDirection::Forward
+		};
+	}
+	else
+	{
+		Options = {
+			EDodgeDirection::Left,
+			EDodgeDirection::Right,
+			EDodgeDirection::BackwardLeft,
+			EDodgeDirection::BackwardRight
+		};
+	}
+
+	if (Options.Num() == 0)
+	{
+		return EDodgeDirection::Backward;
+	}
+
+	const int32 PickedIndex = FMath::RandRange(0, Options.Num() - 1);
+	EDodgeDirection PickedDirection = Options[PickedIndex];
+
+	if (Options.Num() > 1 && PickedDirection == LastTeleportDirection)	// TODO: Change to weight penalty
+	{
+		PickedDirection = Options[(PickedIndex + 1) % Options.Num()];
+	}
+
+	return PickedDirection;
+}
+
+bool AMageBossCharacter::HasAnyValidTeleportMontagePair() const
+{
+	for (const FTeleportMontagePair& Pair : TeleportMontagePairs)
+	{
+		if (Pair.IsValidPair())
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+int32 AMageBossCharacter::ChooseTeleportMontagePairIndex() const
+{
+	TArray<int32> ValidIndices;
+
+	for (int32 Index = 0; Index < TeleportMontagePairs.Num(); ++Index)
+	{
+		if (TeleportMontagePairs[Index].IsValidPair())
+		{
+			ValidIndices.Add(Index);
+		}
+	}
+
+	if (ValidIndices.Num() == 0)
+	{
+		return INDEX_NONE;
+	}
+
+	int32 PickedArrayIndex = FMath::RandRange(0, ValidIndices.Num() - 1);
+
+	if (ValidIndices.Num() > 1 && ValidIndices[PickedArrayIndex] == LastTeleportMontagePairIndex)
+	{
+		PickedArrayIndex = (PickedArrayIndex + 1) % ValidIndices.Num();
+	}
+
+	return ValidIndices[PickedArrayIndex];
+}
+
+UAnimMontage* AMageBossCharacter::GetTeleportBeginMontage(int32 PairIndex) const
+{
+	if (!TeleportMontagePairs.IsValidIndex(PairIndex))
+	{
+		return nullptr;
+	}
+
+	return TeleportMontagePairs[PairIndex].BeginMontage.Get();
+}
+
+UAnimMontage* AMageBossCharacter::GetTeleportEndMontage(int32 PairIndex) const
+{
+	if (!TeleportMontagePairs.IsValidIndex(PairIndex))
+	{
+		return nullptr;
+	}
+
+	return TeleportMontagePairs[PairIndex].EndMontage.Get();
+}
+
+void AMageBossCharacter::OnTeleportBeginMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (ActiveTeleportMontageStage != ETeleportMontageStage::Begin)
+	{
+		return;
+	}
+
+	if (Montage != ActiveTeleportMontage.Get())
+	{
+		return;
+	}
+
+	ActiveTeleportMontage = nullptr;
+	ActiveTeleportMontageStage = ETeleportMontageStage::None;
+
+	if (bInterrupted)
+	{
+		CancelTeleport(true, true);
+		return;
+	}
+
+	if (TeleportRuntime.Phase == ETeleportPhase::Startup)
+	{
+		CancelTeleport(true, true);
+		return;
+	}
+
+	if (TeleportRuntime.Phase == ETeleportPhase::Hidden)
+	{
+		PlayTeleportEndMontage();
+		return;
+	}
+
+	if (TeleportRuntime.Phase == ETeleportPhase::Recovery)
+	{
+		EndTeleport();
+	}
+}
+
+void AMageBossCharacter::OnTeleportEndMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (ActiveTeleportMontageStage != ETeleportMontageStage::End)
+	{
+		return;
+	}
+
+	if (Montage != ActiveTeleportMontage.Get())
+	{
+		return;
+	}
+
+	EndTeleport();
+}
+
+// ===== Destination =====
+
+bool AMageBossCharacter::FindTeleportDestination(
+	EDodgeDirection RequestedDirection,
+	FVector& OutLocation,
+	EDodgeDirection& OutResolvedDirection
+) const
+{
+	const UWorld* World = GetWorld();
+	const UCapsuleComponent* Capsule = GetCapsuleComponent();
+
+	if (!World || !Capsule)
+	{
+		return false;
+	}
+
+	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+
+	TArray<EDodgeDirection> DirectionOrder;
+	DirectionOrder.Reserve(9);
+
+	DirectionOrder.Add(RequestedDirection);
+	DirectionOrder.Add(EDodgeDirection::BackwardLeft);
+	DirectionOrder.Add(EDodgeDirection::BackwardRight);
+	DirectionOrder.Add(EDodgeDirection::Left);
+	DirectionOrder.Add(EDodgeDirection::Right);
+	DirectionOrder.Add(EDodgeDirection::Backward);
+	DirectionOrder.Add(EDodgeDirection::ForwardLeft);
+	DirectionOrder.Add(EDodgeDirection::ForwardRight);
+	DirectionOrder.Add(EDodgeDirection::Forward);
+
+	const TArray<float> DistanceScales = { 1.0f, 0.85f, 0.7f, 0.55f };
+
+	for (const EDodgeDirection CandidateDirection : DirectionOrder)
+	{
+		if (CandidateDirection == EDodgeDirection::None)
+		{
+			continue;
+		}
+
+		const FVector DirectionWorld = TeleportDirectionToWorld(CandidateDirection);
+		if (DirectionWorld.IsNearlyZero())
+		{
+			continue;
+		}
+
+		for (const float DistanceScale : DistanceScales)
+		{
+			const float CandidateDistance = FMath::Max(
+				TeleportMinDistance,
+				TeleportDistance * DistanceScale
+			);
+
+			const FVector RawCandidate =
+				GetActorLocation() + DirectionWorld * CandidateDistance;
+
+			const FVector TraceStart =
+				RawCandidate + FVector::UpVector * TeleportGroundTraceUp;
+
+			const FVector TraceEnd =
+				RawCandidate - FVector::UpVector * TeleportGroundTraceDown;
+
+			FHitResult GroundHit;
+			FCollisionQueryParams GroundQueryParams(
+				FName(TEXT("BossTeleportGroundTrace")),
+				false,
+				this
+			);
+
+			const bool bGroundHit = World->LineTraceSingleByChannel(
+				GroundHit,
+				TraceStart,
+				TraceEnd,
+				TeleportGroundTraceChannel.GetValue(),
+				GroundQueryParams
+			);
+
+			if (!bGroundHit)
+			{
+				continue;
+			}
+
+			if (GroundHit.ImpactNormal.Z < TeleportMinGroundNormalZ)
+			{
+				continue;
+			}
+
+			const FVector CapsuleLocation =
+				GroundHit.ImpactPoint +
+				FVector(0.0f, 0.0f, CapsuleHalfHeight + TeleportGroundOffset);
+
+			const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(
+				FMath::Max(1.0f, CapsuleRadius - 2.0f),
+				FMath::Max(1.0f, CapsuleHalfHeight - 2.0f)
+			);
+
+			FCollisionQueryParams OverlapQueryParams(
+				FName(TEXT("BossTeleportOverlap")),
+				false,
+				this
+			);
+
+			const bool bBlocked = World->OverlapBlockingTestByChannel(
+				CapsuleLocation,
+				FQuat::Identity,
+				TeleportOverlapChannel.GetValue(),
+				CapsuleShape,
+				OverlapQueryParams
+			);
+
+			if (bBlocked)
+			{
+				continue;
+			}
+
+			OutLocation = CapsuleLocation;
+			OutResolvedDirection = CandidateDirection;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+FVector AMageBossCharacter::TeleportDirectionToWorld(EDodgeDirection Direction) const
+{
+	const FVector Forward = GetLockOnBasisForward();
+	const FVector Right = GetLockOnBasisRight();
+
+	switch (Direction)
+	{
+	case EDodgeDirection::Forward:
+		return Forward;
+
+	case EDodgeDirection::Backward:
+		return -Forward;
+
+	case EDodgeDirection::Left:
+		return -Right;
+
+	case EDodgeDirection::Right:
+		return Right;
+
+	case EDodgeDirection::ForwardLeft:
+		return (Forward - Right).GetSafeNormal();
+
+	case EDodgeDirection::ForwardRight:
+		return (Forward + Right).GetSafeNormal();
+
+	case EDodgeDirection::BackwardLeft:
+		return (-Forward - Right).GetSafeNormal();
+
+	case EDodgeDirection::BackwardRight:
+		return (-Forward + Right).GetSafeNormal();
+
+	default:
+		return FVector::ZeroVector;
+	}
+}
+
+FRotator AMageBossCharacter::MakeFacingRotationAtLocation(const FVector& WorldLocation) const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+
+	if (IsValid(Target))
+	{
+		FVector ToTarget = Target->GetActorLocation() - WorldLocation;
+		ToTarget.Z = 0.0f;
+
+		if (!ToTarget.IsNearlyZero())
+		{
+			return ToTarget.Rotation();
+		}
+	}
+
+	return GetActorRotation();
+}
+
+// ===== Visibility / Movement =====
+
+void AMageBossCharacter::SetTeleportHiddenState(bool bShouldHide)
+{
+	TeleportRuntime.bMeshHidden = bShouldHide;
+
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		MeshComp->SetVisibility(!bShouldHide, true);
+	}
+
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionEnabled(
+			bShouldHide
+			? ECollisionEnabled::NoCollision
+			: ECollisionEnabled::QueryAndPhysics
+		);
+	}
+}
+
+void AMageBossCharacter::FreezeMovementForTeleport()
+{
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->DisableMovement();
+	}
+}
+
+void AMageBossCharacter::RestoreMovementAfterTeleport()
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->SetMovementMode(MOVE_Walking);
+	}
+}
+
+void AMageBossCharacter::EndFireball()
+{
+	ActiveFireballMontage = nullptr;
+	bFireballLaunched = false;
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.0f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::CancelFireball(bool bStopMontage, bool bRestoreNeutralState)
+{
+	UAnimMontage* MontageToStop = ActiveFireballMontage.Get();
+
+	ActiveFireballMontage = nullptr;
+	bFireballLaunched = false;
+
+	if (bStopMontage && MontageToStop)
+	{
+		if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+		{
+			if (AnimInstance->Montage_IsPlaying(MontageToStop))
+			{
+				AnimInstance->Montage_Stop(0.05f, MontageToStop);
+			}
+		}
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (bRestoreNeutralState && IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::OnFireballMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != ActiveFireballMontage.Get())
+	{
+		return;
+	}
+
+	EndFireball();
+}
+
+FVector AMageBossCharacter::GetFireballSpawnLocation() const
+{
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+
+	if (MeshComp && MeshComp->DoesSocketExist(FireballSpawnSocketName))
+	{
+		return MeshComp->GetSocketLocation(FireballSpawnSocketName);
+	}
+
+	return GetActorLocation()
+		+ GetActorForwardVector() * FireballSpawnForwardOffset
+		+ FVector::UpVector * FireballSpawnHeightOffset;
+}
+
+FRotator AMageBossCharacter::GetFireballAimRotation(const FVector& SpawnLocation) const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+
+	if (IsValid(Target))
+	{
+		const FVector TargetLocation =
+			Target->GetActorLocation() + FVector::UpVector * FireballAimHeightOffset;
+
+		const FVector AimDirection = (TargetLocation - SpawnLocation).GetSafeNormal();
+
+		if (!AimDirection.IsNearlyZero())
+		{
+			return AimDirection.Rotation();
+		}
+	}
+
+	return GetActorForwardVector().Rotation();
+}
+
+void AMageBossCharacter::EndRuneVolley()
+{
+	ActiveRuneVolleyMontage = nullptr;
+	bRuneVolleySpawned = false;
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::CancelRuneVolley(bool bStopMontage, bool bRestoreNeutralState)
+{
+	UAnimMontage* MontageToStop = ActiveRuneVolleyMontage.Get();
+
+	ActiveRuneVolleyMontage = nullptr;
+	bRuneVolleySpawned = false;
+
+	if (bStopMontage && MontageToStop)
+	{
+		if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+		{
+			if (AnimInstance->Montage_IsPlaying(MontageToStop))
+			{
+				AnimInstance->Montage_Stop(0.05f, MontageToStop);
+			}
+		}
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (bRestoreNeutralState && IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::OnRuneVolleyMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != ActiveRuneVolleyMontage.Get())
+	{
+		return;
+	}
+
+	EndRuneVolley();
+}
+
+FVector AMageBossCharacter::GetRuneSpawnLocation(int32 RuneIndex, int32 RuneCount) const
+{
+	const FVector Forward = GetLockOnBasisForward();
+	const FVector Right = GetLockOnBasisRight();
+
+	const float Center = (static_cast<float>(RuneCount) - 1.0f) * 0.5f;
+	const float SideOffset = (static_cast<float>(RuneIndex) - Center) * RuneSpawnSideSpacing;
+
+	const float HeightStagger =
+		(RuneIndex % 2 == 0)
+		? 0.0f
+		: RuneSpawnHeightStagger;
+
+	return GetActorLocation()
+		- Forward * RuneSpawnBackOffset
+		+ Right * SideOffset
+		+ FVector::UpVector * (RuneSpawnHeight + HeightStagger);
+}
+
+FRotator AMageBossCharacter::GetRuneSpawnRotation(const FVector& SpawnLocation) const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+
+	if (IsValid(Target))
+	{
+		FVector ToTarget = Target->GetActorLocation() - SpawnLocation;
+		ToTarget.Z += 60.f;
+
+		if (!ToTarget.IsNearlyZero())
+		{
+			return ToTarget.Rotation();
+		}
+	}
+
+	return GetActorRotation();
+}
+
+float AMageBossCharacter::GetRuneAimYawOffset(int32 RuneIndex, int32 RuneCount) const
+{
+	if (RuneCount <= 1 || FMath::IsNearlyZero(RuneAimYawSpreadDegrees))
+	{
+		return 0.0f;
+	}
+
+	const float Center = (static_cast<float>(RuneCount) - 1.0f) * 0.5f;
+	const float NormalizedIndex = static_cast<float>(RuneIndex) - Center;
+
+	return NormalizedIndex * RuneAimYawSpreadDegrees;
+}
+
+void AMageBossCharacter::EndRunePrison()
+{
+	ActiveRunePrisonMontage = nullptr;
+	bRunePrisonSpawned = false;
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.0f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::CancelRunePrison(bool bStopMontage, bool bRestoreNeutralState)
+{
+	UAnimMontage* MontageToStop = ActiveRunePrisonMontage.Get();
+
+	ActiveRunePrisonMontage = nullptr;
+	bRunePrisonSpawned = false;
+
+	if (bStopMontage && MontageToStop)
+	{
+		if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+		{
+			if (AnimInstance->Montage_IsPlaying(MontageToStop))
+			{
+				AnimInstance->Montage_Stop(0.05f, MontageToStop);
+			}
+		}
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (bRestoreNeutralState && IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.0f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+}
+
+void AMageBossCharacter::OnRunePrisonMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != ActiveRunePrisonMontage.Get())
+	{
+		return;
+	}
+
+	EndRunePrison();
+}
+
+FVector AMageBossCharacter::GetRunePrisonCenterLocation() const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+
+	if (IsValid(Target))
+	{
+		return Target->GetActorLocation();
+	}
+
+	return GetActorLocation() + GetActorForwardVector() * RunePrisonFallbackForwardDistance;
+}

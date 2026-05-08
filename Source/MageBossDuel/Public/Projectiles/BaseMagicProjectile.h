@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Combat/HitTypes.h"
 #include "BaseMagicProjectile.generated.h"
 
 class USphereComponent;
@@ -30,8 +31,8 @@ protected:
 	UPROPERTY(EditAnywhere)
 	TObjectPtr<UProjectileMovementComponent> ProjectileMovement;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float Damage = 10.f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
+	FHitPayload HitPayload;
 
 	UFUNCTION()
 	void OnProjectileBeginOverlap(
@@ -61,6 +62,12 @@ public:
 	void SetDamage(float NewDamage);
 
 	UFUNCTION(BlueprintPure, Category = "Combat")
-	float GetDamage() const { return Damage; }
+	float GetDamage() const { return HitPayload.Damage; }
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void SetHitPayload(const FHitPayload& NewHitPayload);
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	const FHitPayload& GetHitPayload() const { return HitPayload; }
 
 };
