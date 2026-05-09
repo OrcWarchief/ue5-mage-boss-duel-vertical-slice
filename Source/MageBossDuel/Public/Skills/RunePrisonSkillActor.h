@@ -10,6 +10,8 @@
 class USceneComponent;
 class ABaseCharacter;
 class ARunePrisonBeamSegment;
+class UNiagaraSystem;
+class UNiagaraComponent;
 
 UCLASS()
 class MAGEBOSSDUEL_API ARunePrisonSkillActor : public AActor
@@ -109,8 +111,31 @@ protected:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<ARunePrisonBeamSegment>> ActiveSegments;
 
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UNiagaraComponent>> TelegraphFXComponents;
+
+	// ===== Telegraph VFX =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Telegraph")
+	TObjectPtr<UNiagaraSystem> TelegraphCenterSystem = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Telegraph")
+	TObjectPtr<UNiagaraSystem> AnchorTelegraphSystem = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Telegraph", meta = (ClampMin = "0.01", UIMin = "0.01"))
+	float TelegraphCenterScale = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Telegraph", meta = (ClampMin = "0.01", UIMin = "0.01"))
+	float AnchorTelegraphScale = 0.65f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Telegraph", meta = (Units = "cm"))
+	float AnchorTelegraphZOffset = 10.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Telegraph")
+	bool bSpawnSegmentsDuringTelegraph = true;
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "Skill|RunePrison")
-	void OnPrisonTelegraphStarted(
+	void BP_OnPrisonTelegraphStarted(
 		const TArray<FVector>& InAnchorLocations,
 		int32 InOpenGapIndex,
 		float InTelegraphDuration
@@ -152,4 +177,20 @@ private:
 	void ApplyFinalBlastDamage();
 
 	bool IsIgnoredActor(AActor* Actor) const;
+
+	void StartPrisonTelegraph(
+		const TArray<FVector>& InAnchorLocations,
+		int32 InOpenGapIndex,
+		float InTelegraphDuration
+	);
+
+	void ClearTelegraphFX();
+
+	UNiagaraComponent* SpawnTelegraphFX(
+		UNiagaraSystem* System,
+		const FVector& Location,
+		float UniformScale
+	);
+
+	void DestroyAllSegments();
 };
