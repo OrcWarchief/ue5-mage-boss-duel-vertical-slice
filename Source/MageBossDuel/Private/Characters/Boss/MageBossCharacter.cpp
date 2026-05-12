@@ -9,6 +9,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
 AMageBossCharacter::AMageBossCharacter()
 {
@@ -18,6 +20,8 @@ AMageBossCharacter::AMageBossCharacter()
 	{
 		MeshComp->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	}
+
+	InitializeDefaultBossSkillOptions();
 
 	RuneHitPayload.Damage = 12.0f;
 	RuneHitPayload.PoiseDamage = 25.0f;
@@ -556,6 +560,113 @@ bool AMageBossCharacter::IsRunePrisonPatternActive() const
 	return IsValid(ActiveRunePrisonActor.Get());
 }
 
+void AMageBossCharacter::StartBossBrain()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	World->GetTimerManager().ClearTimer(BossBrainTimerHandle);
+
+	const float Interval = FMath::Max(0.05f, BossBrainThinkInterval);
+
+	World->GetTimerManager().SetTimer(
+		BossBrainTimerHandle,
+		this,
+		&AMageBossCharacter::BossBrainThink,
+		Interval,
+		true
+	);
+
+	if (bEnableBossBrainDebug)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[BossBrain] Started"));
+	}
+}
+
+void AMageBossCharacter::StopBossBrain()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BossBrainTimerHandle);
+	}
+
+	if (bEnableBossBrainDebug)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[BossBrain] Stopped"));
+	}
+}
+
+bool AMageBossCharacter::TrySelectAndStartBossSkill()
+{
+	TArray<FBossSkillOption> Candidates;
+
+	if (!BuildBossSkillCandidates(Candidates))
+	{
+		if (bAllowBasicAttackFallback && CanBasicAttack())
+		{
+			return TryStartBossSkill(EBossSkillType::BasicAttack);
+		}
+
+		return false;
+	}
+
+	while (Candidates.Num() > 0)
+	{
+		const int32 PickedIndex = PickWeightedBossSkillIndex(Candidates);
+
+		if (!Candidates.IsValidIndex(PickedIndex))
+		{
+			break;
+		}
+
+		const EBossSkillType PickedSkill = Candidates[PickedIndex].SkillType;
+
+		if (TryStartBossSkill(PickedSkill))
+		{
+			return true;
+		}
+
+		// 실패한 경우 후보에서 제거하고 재시도
+		Candidates.RemoveAt(PickedIndex);
+	}
+
+	if (bAllowBasicAttackFallback && CanBasicAttack())
+	{
+		return TryStartBossSkill(EBossSkillType::BasicAttack);
+	}
+
+	return false;
+}
+
+bool AMageBossCharacter::IsBossBrainRunning() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	return World->GetTimerManager().IsTimerActive(BossBrainTimerHandle);
+}
+
+void AMageBossCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (bAutoAcquirePlayerTargetOnBeginPlay && !IsValid(CurrentCombatTarget.Get()))
+	{
+		SetCombatTarget(UGameplayStatics::GetPlayerPawn(this, 0));
+	}
+
+	if (bAutoStartBossBrain)
+	{
+		StartBossBrain();
+	}
+}
+
 bool AMageBossCharacter::IsLockOnActive() const
 {
 	return IsValid(CurrentCombatTarget.Get());
@@ -742,6 +853,8 @@ void AMageBossCharacter::OnHitReaction_Implementation()
 
 void AMageBossCharacter::Die_Implementation()
 {
+	StopBossBrain();
+
 	if (IsTeleporting())
 	{
 		CancelTeleport(false, false);
@@ -1637,4 +1750,327 @@ FVector AMageBossCharacter::GetRunePrisonCenterLocation() const
 	}
 
 	return GetActorLocation() + GetActorForwardVector() * RunePrisonFallbackForwardDistance;
+}
+
+void AMageBossCharacter::BossBrainThink()
+{
+	if (!IsAlive())
+	{
+		StopBossBrain();
+		return;
+	}
+
+	if (!IsValid(CurrentCombatTarget.Get()))
+	{
+		return;
+	}
+
+	if (IsAnyBossSkillActive())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+
+	if ((Now - LastBossSkillStartTime) < MinSecondsBetweenSkillStarts)
+	{
+		return;
+	}
+
+	TrySelectAndStartBossSkill();
+}
+
+bool AMageBossCharacter::IsAnyBossSkillActive() const
+{
+	if (IsTeleporting())
+	{
+		return true;
+	}
+
+	if (IsCastingFireball())
+	{
+		return true;
+	}
+
+	if (IsCastingRuneVolley())
+	{
+		return true;
+	}
+
+	if (IsCastingRunePrison())
+	{
+		return true;
+	}
+
+	return false;
+}
+
+bool AMageBossCharacter::BuildBossSkillCandidates(TArray<FBossSkillOption>& OutCandidates) const
+{
+	OutCandidates.Reset();
+
+	for (const FBossSkillOption& Option : BossSkillOptions)
+	{
+		if (IsBossSkillOptionAllowed(Option))
+		{
+			OutCandidates.Add(Option);
+		}
+	}
+
+	return OutCandidates.Num() > 0;
+}
+
+bool AMageBossCharacter::IsBossSkillOptionAllowed(const FBossSkillOption& Option) const
+{
+	if (!Option.bEnabled)
+	{
+		return false;
+	}
+
+	if (Option.SkillType == EBossSkillType::None)
+	{
+		return false;
+	}
+
+	if (Option.Weight <= 0.0f)
+	{
+		return false;
+	}
+
+	const AActor* Target = CurrentCombatTarget.Get();
+	if (!IsValid(Target))
+	{
+		return false;
+	}
+
+	const float DistanceToTarget =
+		FVector::Dist2D(GetActorLocation(), Target->GetActorLocation());
+
+	if (DistanceToTarget < Option.MinDistance ||
+		DistanceToTarget > Option.MaxDistance)
+	{
+		return false;
+	}
+
+	const float HealthPercent = GetHealthPercent();
+
+	if (HealthPercent < Option.MinHealthPercent ||
+		HealthPercent > Option.MaxHealthPercent)
+	{
+		return false;
+	}
+
+	if (!Option.bAllowRepeat && Option.SkillType == LastStartedBossSkill)
+	{
+		return false;
+	}
+
+	if (!CanStartBossSkill(Option.SkillType))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool AMageBossCharacter::CanStartBossSkill(EBossSkillType SkillType) const
+{
+	if (bBlockOtherSkillsDuringRunePrisonPattern &&
+		IsRunePrisonPatternActive() &&
+		SkillType != EBossSkillType::BasicAttack)
+	{
+		return false;
+	}
+
+	switch (SkillType)
+	{
+	case EBossSkillType::BasicAttack:
+		return CanBasicAttack();
+
+	case EBossSkillType::Teleport:
+		return CanStartTeleport(EDodgeDirection::None);
+
+	case EBossSkillType::KnockdownFireball:
+		return CanStartFireball();
+
+	case EBossSkillType::RuneVolley:
+		return CanStartRuneVolley();
+
+	case EBossSkillType::RunePrison:
+		return CanStartRunePrison();
+
+	case EBossSkillType::None:
+	default:
+		return false;
+	}
+}
+
+bool AMageBossCharacter::TryStartBossSkill(EBossSkillType SkillType)
+{
+	bool bStarted = false;
+
+	switch (SkillType)
+	{
+	case EBossSkillType::BasicAttack:
+		if (CanBasicAttack())
+		{
+			StartBasicAttack();
+			bStarted = true;
+		}
+		break;
+
+	case EBossSkillType::Teleport:
+		bStarted = TryStartTeleport(EDodgeDirection::None);
+		break;
+
+	case EBossSkillType::KnockdownFireball:
+		bStarted = TryStartFireball();
+		break;
+
+	case EBossSkillType::RuneVolley:
+		bStarted = TryStartRuneVolley();
+		break;
+
+	case EBossSkillType::RunePrison:
+		bStarted = TryStartRunePrison();
+		break;
+
+	case EBossSkillType::None:
+	default:
+		break;
+	}
+
+	if (bStarted)
+	{
+		LastStartedBossSkill = SkillType;
+
+		if (UWorld* World = GetWorld())
+		{
+			LastBossSkillStartTime = World->GetTimeSeconds();
+		}
+
+		if (bEnableBossBrainDebug)
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("[BossBrain] Started skill: %s"),
+				*UEnum::GetValueAsString(SkillType)
+			);
+		}
+	}
+
+	return bStarted;
+}
+
+int32 AMageBossCharacter::PickWeightedBossSkillIndex(const TArray<FBossSkillOption>& Candidates) const
+{
+	if (Candidates.Num() <= 0)
+	{
+		return INDEX_NONE;
+	}
+
+	float TotalWeight = 0.0f;
+
+	for (const FBossSkillOption& Candidate : Candidates)
+	{
+		TotalWeight += FMath::Max(0.0f, Candidate.Weight);
+	}
+
+	if (TotalWeight <= 0.0f)
+	{
+		return INDEX_NONE;
+	}
+
+	const float Roll = FMath::FRandRange(0.0f, TotalWeight);
+
+	float AccumulatedWeight = 0.0f;
+
+	for (int32 Index = 0; Index < Candidates.Num(); ++Index)
+	{
+		AccumulatedWeight += FMath::Max(0.0f, Candidates[Index].Weight);
+
+		if (Roll <= AccumulatedWeight)
+		{
+			return Index;
+		}
+	}
+
+	return Candidates.Num() - 1;
+}
+
+void AMageBossCharacter::InitializeDefaultBossSkillOptions()
+{
+	BossSkillOptions.Reset();
+
+	// 빈틈 채우기. 반복 허용.
+	{
+		FBossSkillOption Option;
+		Option.SkillType = EBossSkillType::BasicAttack;
+		Option.Weight = 1.6f;
+		Option.MinDistance = 0.0f;
+		Option.MaxDistance = 900.0f;
+		Option.MinHealthPercent = 0.0f;
+		Option.MaxHealthPercent = 1.0f;
+		Option.bAllowRepeat = true;
+		BossSkillOptions.Add(Option);
+	}
+
+	// 위치 재배치. 전 페이즈 사용.
+	{
+		FBossSkillOption Option;
+		Option.SkillType = EBossSkillType::Teleport;
+		Option.Weight = 1.0f;
+		Option.MinDistance = 0.0f;
+		Option.MaxDistance = 850.0f;
+		Option.MinHealthPercent = 0.0f;
+		Option.MaxHealthPercent = 1.0f;
+		Option.bAllowRepeat = false;
+		BossSkillOptions.Add(Option);
+	}
+
+	// 단발 큰 투사체. 중거리~원거리.
+	{
+		FBossSkillOption Option;
+		Option.SkillType = EBossSkillType::KnockdownFireball;
+		Option.Weight = 1.3f;
+		Option.MinDistance = 350.0f;
+		Option.MaxDistance = 1300.0f;
+		Option.MinHealthPercent = 0.0f;
+		Option.MaxHealthPercent = 1.0f;
+		Option.bAllowRepeat = false;
+		BossSkillOptions.Add(Option);
+	}
+
+	// HP 75% 이하부터 본격 사용.
+	{
+		FBossSkillOption Option;
+		Option.SkillType = EBossSkillType::RuneVolley;
+		Option.Weight = 1.1f;
+		Option.MinDistance = 400.0f;
+		Option.MaxDistance = 1400.0f;
+		Option.MinHealthPercent = 0.0f;
+		Option.MaxHealthPercent = 0.75f;
+		Option.bAllowRepeat = false;
+		BossSkillOptions.Add(Option);
+	}
+
+	// HP 45% 이하 시그니처.
+	{
+		FBossSkillOption Option;
+		Option.SkillType = EBossSkillType::RunePrison;
+		Option.Weight = 0.8f;
+		Option.MinDistance = 250.0f;
+		Option.MaxDistance = 1000.0f;
+		Option.MinHealthPercent = 0.0f;
+		Option.MaxHealthPercent = 0.45f;
+		Option.bAllowRepeat = false;
+		BossSkillOptions.Add(Option);
+	}
 }

@@ -108,11 +108,11 @@ void ARunePrisonBeamSegment::ActivateSegment()
 }
 
 void ARunePrisonBeamSegment::OnSegmentBeginOverlap(
-	UPrimitiveComponent* OverlappedComponent, 
-	AActor* OtherActor, 
-	UPrimitiveComponent* OtherComp, 
-	int32 OtherBodyIndex, 
-	bool bFromSweep, 
+	UPrimitiveComponent* OverlappedComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComp,
+	int32 OtherBodyIndex,
+	bool bFromSweep,
 	const FHitResult& SweepResult
 )
 {
@@ -184,6 +184,3 @@ void ARunePrisonBeamSegment::ApplyDamageToActor(AActor* Actor)
 
 	OnSegmentHitActor(Actor);
 }
-
-
-

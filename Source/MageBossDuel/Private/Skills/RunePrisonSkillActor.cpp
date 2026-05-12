@@ -10,9 +10,6 @@
 #include "Engine/World.h"
 #include "Skills/RunePrisonBeamSegment.h"
 #include "TimerManager.h"
-#include "NiagaraComponent.h"
-#include "NiagaraFunctionLibrary.h"
-#include "NiagaraSystem.h"
 
 ARunePrisonSkillActor::ARunePrisonSkillActor()
 {
@@ -47,8 +44,15 @@ void ARunePrisonSkillActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		World->GetTimerManager().ClearTimer(CleanupTimerHandle);
 	}
 
-	ClearTelegraphFX();
-	DestroyAllSegments();
+	for (ARunePrisonBeamSegment* Segment : ActiveSegments)
+	{
+		if (IsValid(Segment))
+		{
+			Segment->Destroy();
+		}
+	}
+
+	ActiveSegments.Reset();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -85,7 +89,7 @@ void ARunePrisonSkillActor::InitializePrison(ABaseCharacter* InDamageCauser, AAc
 
 	BuildAnchorLocations();
 
-	StartPrisonTelegraph(AnchorLocations, OpenGapIndex, TelegraphDuration);
+	OnPrisonTelegraphStarted(AnchorLocations, OpenGapIndex, TelegraphDuration);
 
 	if (bDrawDebug)
 	{
@@ -144,12 +148,7 @@ void ARunePrisonSkillActor::ActivatePrison()
 
 	bPrisonActive = true;
 
-	ClearTelegraphFX();
-
-	if (ActiveSegments.Num() == 0)
-	{
-		SpawnBeamSegments();
-	}
+	SpawnBeamSegments();
 
 	for (ARunePrisonBeamSegment* Segment : ActiveSegments)
 	{
@@ -235,8 +234,15 @@ void ARunePrisonSkillActor::CleanupPrison()
 {
 	OnPrisonFinished();
 
-	ClearTelegraphFX();
-	DestroyAllSegments();
+	for (ARunePrisonBeamSegment* Segment : ActiveSegments)
+	{
+		if (IsValid(Segment))
+		{
+			Segment->Destroy();
+		}
+	}
+
+	ActiveSegments.Reset();
 
 	Destroy();
 }
@@ -320,11 +326,7 @@ void ARunePrisonSkillActor::SpawnBeamSegments()
 		return;
 	}
 
-	const int32 Count = AnchorLocations.Num();
-	if (Count < 3)
-	{
-		return;
-	}
+	const int32 Count = FMath::Max(3, AnchorLocations.Num());
 
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
@@ -481,97 +483,4 @@ bool ARunePrisonSkillActor::IsIgnoredActor(AActor* Actor) const
 	}
 
 	return false;
-}
-
-void ARunePrisonSkillActor::StartPrisonTelegraph(const TArray<FVector>& InAnchorLocations, int32 InOpenGapIndex, float InTelegraphDuration)
-{
-	ClearTelegraphFX();
-	DestroyAllSegments();
-
-	if (UNiagaraComponent* CenterFX = SpawnTelegraphFX(
-		TelegraphCenterSystem.Get(),
-		GetActorLocation(),
-		TelegraphCenterScale))
-	{
-		TelegraphFXComponents.Add(CenterFX);
-	}
-
-	for (const FVector& AnchorLocation : InAnchorLocations)
-	{
-		const FVector SpawnLocation =
-			AnchorLocation + FVector::UpVector * AnchorTelegraphZOffset;
-
-		if (UNiagaraComponent* AnchorFX = SpawnTelegraphFX(
-			AnchorTelegraphSystem.Get(),
-			SpawnLocation,
-			AnchorTelegraphScale))
-		{
-			TelegraphFXComponents.Add(AnchorFX);
-		}
-	}
-
-	if (bSpawnSegmentsDuringTelegraph)
-	{
-		SpawnBeamSegments();
-	}
-
-	BP_OnPrisonTelegraphStarted(
-		InAnchorLocations,
-		InOpenGapIndex,
-		InTelegraphDuration
-	);
-}
-
-void ARunePrisonSkillActor::ClearTelegraphFX()
-{
-	for (const TObjectPtr<UNiagaraComponent>& FXComponentPtr : TelegraphFXComponents)
-	{
-		UNiagaraComponent* FXComponent = FXComponentPtr.Get();
-		if (IsValid(FXComponent))
-		{
-			FXComponent->Deactivate();
-			FXComponent->DestroyComponent();
-		}
-	}
-
-	TelegraphFXComponents.Reset();
-}
-
-UNiagaraComponent* ARunePrisonSkillActor::SpawnTelegraphFX(UNiagaraSystem* System, const FVector& Location, float UniformScale)
-{
-	if (!System)
-	{
-		return nullptr;
-	}
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-
-	return UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-		World,
-		System,
-		Location,
-		FRotator::ZeroRotator,
-		FVector(UniformScale, UniformScale, UniformScale),
-		false,
-		true,
-		ENCPoolMethod::None,
-		true
-	);
-}
-
-void ARunePrisonSkillActor::DestroyAllSegments()
-{
-	for (ARunePrisonBeamSegment* Segment : ActiveSegments)
-	{
-		if (IsValid(Segment))
-		{
-			Segment->Destroy();
-		}
-	}
-
-	ActiveSegments.Reset();
 }

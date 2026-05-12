@@ -65,6 +65,49 @@ struct FTeleportRuntime
 	bool bMeshHidden = false;
 };
 
+UENUM(BlueprintType)
+enum class EBossSkillType : uint8
+{
+	None UMETA(DisplayName = "None"),
+
+	BasicAttack UMETA(DisplayName = "Basic Attack"),
+	Teleport UMETA(DisplayName = "Teleport"),
+	KnockdownFireball UMETA(DisplayName = "Knockdown Fireball"),
+	RuneVolley UMETA(DisplayName = "Rune Volley"),
+	RunePrison UMETA(DisplayName = "Rune Prison")
+};
+
+USTRUCT(BlueprintType)
+struct FBossSkillOption
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	EBossSkillType SkillType = EBossSkillType::None;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bEnabled = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float Weight = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float MinDistance = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float MaxDistance = 999999.0f;
+
+	// HP percent ±‚¡ÿ. 0.0 = 0%, 1.0 = 100%.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MinHealthPercent = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MaxHealthPercent = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAllowRepeat = false;
+};
+
 UCLASS()
 class MAGEBOSSDUEL_API AMageBossCharacter : public ABaseCharacter
 {
@@ -148,7 +191,26 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Skill|RunePrison")
 	bool IsRunePrisonPatternActive() const;
 
+	// ===== Boss Brain =====
+
+	UFUNCTION(BlueprintCallable, Category = "BossAI")
+	void StartBossBrain();
+
+	UFUNCTION(BlueprintCallable, Category = "BossAI")
+	void StopBossBrain();
+
+	UFUNCTION(BlueprintCallable, Category = "BossAI")
+	bool TrySelectAndStartBossSkill();
+
+	UFUNCTION(BlueprintPure, Category = "BossAI")
+	bool IsBossBrainRunning() const;
+
+	UFUNCTION(BlueprintPure, Category = "BossAI")
+	EBossSkillType GetLastStartedBossSkill() const { return LastStartedBossSkill; }
+
 protected:
+	virtual void BeginPlay() override;
+
 	// ===== BaseCharacter hooks =====
 
 	virtual bool IsLockOnActive() const override;
@@ -321,6 +383,40 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Runtime")
 	float LastRunePrisonTime = -9999.0f;
 
+	// ===== Boss Brain Tuning =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAutoStartBossBrain = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAutoAcquirePlayerTargetOnBeginPlay = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
+	float BossBrainThinkInterval = 0.35f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float MinSecondsBetweenSkillStarts = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAllowBasicAttackFallback = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bBlockOtherSkillsDuringRunePrisonPattern = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bEnableBossBrainDebug = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	TArray<FBossSkillOption> BossSkillOptions;
+
+	// ===== Boss Brain Runtime =====
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Runtime")
+	EBossSkillType LastStartedBossSkill = EBossSkillType::None;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Runtime")
+	float LastBossSkillStartTime = -9999.0f;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> ActiveTeleportMontage = nullptr;
@@ -398,4 +494,24 @@ private:
 	void OnRunePrisonMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	FVector GetRunePrisonCenterLocation() const;
+
+	// ===== Boss Brain =====
+
+	FTimerHandle BossBrainTimerHandle;
+
+	void BossBrainThink();
+
+	bool IsAnyBossSkillActive() const;
+
+	bool BuildBossSkillCandidates(TArray<FBossSkillOption>& OutCandidates) const;
+
+	bool IsBossSkillOptionAllowed(const FBossSkillOption& Option) const;
+
+	bool CanStartBossSkill(EBossSkillType SkillType) const;
+
+	bool TryStartBossSkill(EBossSkillType SkillType);
+
+	int32 PickWeightedBossSkillIndex(const TArray<FBossSkillOption>& Candidates) const;
+
+	void InitializeDefaultBossSkillOptions();
 };
