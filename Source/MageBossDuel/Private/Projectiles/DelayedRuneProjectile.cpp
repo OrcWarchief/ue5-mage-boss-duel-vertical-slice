@@ -14,6 +14,8 @@ ADelayedRuneProjectile::ADelayedRuneProjectile()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
+	Tags.Add(TEXT("BossSkillActor"));
+
 	CollisionComp = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionComp"));
 	RootComponent = CollisionComp;
 

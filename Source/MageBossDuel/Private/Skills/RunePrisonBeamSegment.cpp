@@ -13,6 +13,8 @@ ARunePrisonBeamSegment::ARunePrisonBeamSegment()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
+	Tags.Add(TEXT("BossSkillActor"));
+
 	CollisionComp = CreateDefaultSubobject<UBoxComponent>(TEXT("CollisionComp"));
 	RootComponent = CollisionComp;
 

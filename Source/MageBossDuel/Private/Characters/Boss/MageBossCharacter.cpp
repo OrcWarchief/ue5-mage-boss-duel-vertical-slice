@@ -52,6 +52,11 @@ bool AMageBossCharacter::CanStartFireball() const
 		return false;
 	}
 
+	if (IsPhaseTransitioning())
+	{
+		return false;
+	}
+
 	const ECharacterState State = GetCurrentState();
 	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
 	{
@@ -190,6 +195,11 @@ void AMageBossCharacter::LaunchFireball()
 bool AMageBossCharacter::CanStartRuneVolley() const
 {
 	if (!IsAlive())
+	{
+		return false;
+	}
+
+	if (IsPhaseTransitioning())
 	{
 		return false;
 	}
@@ -376,6 +386,11 @@ void AMageBossCharacter::SpawnRuneVolley()
 bool AMageBossCharacter::CanStartRunePrison() const
 {
 	if (!IsAlive())
+	{
+		return false;
+	}
+
+	if (IsPhaseTransitioning())
 	{
 		return false;
 	}
@@ -652,6 +667,97 @@ bool AMageBossCharacter::IsBossBrainRunning() const
 	return World->GetTimerManager().IsTimerActive(BossBrainTimerHandle);
 }
 
+bool AMageBossCharacter::TryStartPendingPhaseTransition()
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	if (bIsPhaseTransitioning)
+	{
+		return false;
+	}
+
+	if (IsAnyBossSkillActive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	const EBossPhase DesiredPhase = GetDesiredBossPhaseFromHealth();
+
+	if (!ShouldEnterBossPhase(DesiredPhase))
+	{
+		return false;
+	}
+
+	BeginBossPhaseTransition(DesiredPhase);
+	return true;
+}
+
+void AMageBossCharacter::FinishBossPhaseTransition()
+{
+	if (!bIsPhaseTransitioning)
+	{
+		return;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PhaseTransitionFallbackTimerHandle);
+	}
+
+	CurrentBossPhase = PendingBossPhase;
+
+	ApplyBossPhaseTuning(CurrentBossPhase);
+
+	if (bResetGlobalSkillDelayOnPhaseTransition)
+	{
+		LastBossSkillStartTime = -9999.0f;
+		LastStartedBossSkill = EBossSkillType::None;
+	}
+
+	ActivePhaseTransitionMontage = nullptr;
+	bIsPhaseTransitioning = false;
+
+	if (bInvulnerableDuringPhaseTransition)
+	{
+		SetInvulnerable(false);
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		if (IsAlive())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (IsAlive())
+	{
+		SetCharacterState(
+			GetVelocity().Size2D() > 10.0f
+			? ECharacterState::Moving
+			: ECharacterState::Idle
+		);
+	}
+
+	OnBossPhaseChanged(CurrentBossPhase);
+	OnBossPhaseTransitionFinished(CurrentBossPhase);
+
+	if (bAutoStartBossBrain && IsAlive())
+	{
+		StartBossBrain();
+	}
+}
+
 void AMageBossCharacter::BeginPlay()
 {
 	Super::BeginPlay();
@@ -687,6 +793,11 @@ AActor* AMageBossCharacter::GetLockOnTargetActor_Implementation() const
 bool AMageBossCharacter::CanStartTeleport(EDodgeDirection RequestedDirection) const
 {
 	if (!IsAlive())
+	{
+		return false;
+	}
+
+	if (IsPhaseTransitioning())
 	{
 		return false;
 	}
@@ -828,6 +939,11 @@ void AMageBossCharacter::ReappearTeleport()
 
 void AMageBossCharacter::OnHitReaction_Implementation()
 {
+	if (IsPhaseTransitioning())
+	{
+		return;
+	}
+
 	if (IsTeleporting())
 	{
 		CancelTeleport(false, true);
@@ -854,6 +970,15 @@ void AMageBossCharacter::OnHitReaction_Implementation()
 void AMageBossCharacter::Die_Implementation()
 {
 	StopBossBrain();
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PhaseTransitionFallbackTimerHandle);
+	}
+
+	bIsPhaseTransitioning = false;
+	ActivePhaseTransitionMontage = nullptr;
+	SetInvulnerable(false);
 
 	if (IsTeleporting())
 	{
@@ -1770,6 +1895,11 @@ void AMageBossCharacter::BossBrainThink()
 		return;
 	}
 
+	if (TryStartPendingPhaseTransition())
+	{
+		return;
+	}
+
 	UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -1884,6 +2014,11 @@ bool AMageBossCharacter::CanStartBossSkill(EBossSkillType SkillType) const
 	if (bBlockOtherSkillsDuringRunePrisonPattern &&
 		IsRunePrisonPatternActive() &&
 		SkillType != EBossSkillType::BasicAttack)
+	{
+		return false;
+	}
+
+	if (IsPhaseTransitioning())
 	{
 		return false;
 	}
@@ -2072,5 +2207,163 @@ void AMageBossCharacter::InitializeDefaultBossSkillOptions()
 		Option.MaxHealthPercent = 0.45f;
 		Option.bAllowRepeat = false;
 		BossSkillOptions.Add(Option);
+	}
+}
+
+EBossPhase AMageBossCharacter::GetDesiredBossPhaseFromHealth() const
+{
+	const float HP = GetHealthPercent();
+
+	if (HP <= Phase3HealthThreshold)
+	{
+		return EBossPhase::Phase3;
+	}
+
+	if (HP <= Phase2HealthThreshold)
+	{
+		return EBossPhase::Phase2;
+	}
+
+	return EBossPhase::Phase1;
+}
+
+bool AMageBossCharacter::ShouldEnterBossPhase(EBossPhase DesiredPhase) const
+{
+	return static_cast<uint8>(DesiredPhase) > static_cast<uint8>(CurrentBossPhase);
+}
+
+UAnimMontage* AMageBossCharacter::GetPhaseTransitionMontage(EBossPhase TargetPhase) const
+{
+	switch (TargetPhase)
+	{
+	case EBossPhase::Phase2:
+		return Phase2TransitionMontage.Get();
+
+	case EBossPhase::Phase3:
+		return Phase3TransitionMontage.Get();
+
+	case EBossPhase::Phase1:
+	default:
+		return nullptr;
+	}
+}
+
+void AMageBossCharacter::BeginBossPhaseTransition(EBossPhase TargetPhase)
+{
+	if (bIsPhaseTransitioning)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const EBossPhase OldPhase = CurrentBossPhase;
+
+	bIsPhaseTransitioning = true;
+	PendingBossPhase = TargetPhase;
+	ActivePhaseTransitionMontage = GetPhaseTransitionMontage(TargetPhase);
+
+	if (bStopBrainDuringPhaseTransition)
+	{
+		StopBossBrain();
+	}
+
+	if (bInvulnerableDuringPhaseTransition)
+	{
+		SetInvulnerable(true);
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->DisableMovement();
+	}
+
+	SetCharacterState(ECharacterState::Attacking);
+
+	if (IsValid(CurrentCombatTarget.Get()))
+	{
+		FaceWorldDirection(GetLockOnBasisForward());
+	}
+
+	OnBossPhaseTransitionStarted(OldPhase, TargetPhase);
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+
+	if (AnimInstance && ActivePhaseTransitionMontage)
+	{
+		const float PlayLength = AnimInstance->Montage_Play(ActivePhaseTransitionMontage, 1.0f);
+
+		if (PlayLength > 0.0f)
+		{
+			FOnMontageEnded MontageEndedDelegate;
+			MontageEndedDelegate.BindUObject(
+				this,
+				&AMageBossCharacter::OnPhaseTransitionMontageEnded
+			);
+
+			AnimInstance->Montage_SetEndDelegate(
+				MontageEndedDelegate,
+				ActivePhaseTransitionMontage
+			);
+
+			return;
+		}
+	}
+
+	World->GetTimerManager().SetTimer(
+		PhaseTransitionFallbackTimerHandle,
+		this,
+		&AMageBossCharacter::FinishBossPhaseTransition,
+		FMath::Max(0.0f, PhaseTransitionFallbackDuration),
+		false
+	);
+}
+
+void AMageBossCharacter::OnPhaseTransitionMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (!bIsPhaseTransitioning)
+	{
+		return;
+	}
+
+	if (Montage != ActivePhaseTransitionMontage.Get())
+	{
+		return;
+	}
+
+	FinishBossPhaseTransition();
+}
+
+void AMageBossCharacter::ApplyBossPhaseTuning(EBossPhase NewPhase)
+{
+	switch (NewPhase)
+	{
+	case EBossPhase::Phase2:
+		MinSecondsBetweenSkillStarts = Phase2MinSecondsBetweenSkillStarts;
+
+		RuneProjectileCount = FMath::Max(RuneProjectileCount, Phase2RuneProjectileCount);
+		RuneActivationInterval = FMath::Min(RuneActivationInterval, Phase2RuneActivationInterval);
+
+		break;
+
+	case EBossPhase::Phase3:
+		MinSecondsBetweenSkillStarts = Phase3MinSecondsBetweenSkillStarts;
+
+		RuneProjectileCount = FMath::Max(RuneProjectileCount, Phase3RuneProjectileCount);
+		RuneActivationInterval = FMath::Min(RuneActivationInterval, Phase3RuneActivationInterval);
+
+		TeleportCooldown = FMath::Min(TeleportCooldown, Phase3TeleportCooldown);
+		RunePrisonCooldown = FMath::Min(RunePrisonCooldown, Phase3RunePrisonCooldown);
+
+		break;
+
+	case EBossPhase::Phase1:
+	default:
+		break;
 	}
 }

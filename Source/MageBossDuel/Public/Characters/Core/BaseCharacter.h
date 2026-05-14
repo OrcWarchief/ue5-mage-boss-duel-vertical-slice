@@ -49,6 +49,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
     float, Percent
 );
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+    FCharacterDeathEvent,
+    ABaseCharacter*,
+    DeadCharacter
+);
+
 /**
  * 플레이어/보스 공용 베이스.
  * - Health/Mana 관리(클램프) + 사망 처리
@@ -169,6 +175,26 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "State")
     ECharacterState GetCurrentState() const { return CurrentState; }
+
+    // ===== Phase =====
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetInvulnerable(bool bNewInvulnerable);
+
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    bool IsInvulnerable() const { return bIsInvulnerable; }
+
+    // ===== Death =====
+    UPROPERTY(BlueprintAssignable, Category = "Combat|Death")
+    FCharacterDeathEvent OnCharacterDeathStarted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Combat|Death")
+    FCharacterDeathEvent OnCharacterDeathFinished;
+
+    UFUNCTION(BlueprintPure, Category = "Combat|Death")
+    bool IsDeathSequenceStarted() const { return bDeathSequenceStarted; }
+
+    UFUNCTION(BlueprintPure, Category = "Combat|Death")
+    bool IsDeathSequenceFinished() const { return bDeathSequenceFinished; }
 
 protected:
     virtual void BeginPlay() override;
@@ -329,6 +355,25 @@ protected:
     void EndDodge();
     void OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
+    // ===== Death Tuning =====
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Death")
+    TObjectPtr<UAnimMontage> DeathMontage = nullptr;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Death", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+    float DeathFallbackDuration = 1.5f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Death")
+    bool bDisableCapsuleCollisionOnDeath = true;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Death")
+    bool bStopAllMontagesBeforeDeathMontage = true;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Death")
+    bool bDeathSequenceStarted = false;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Death")
+    bool bDeathSequenceFinished = false;
 
 protected:
     // ===== Tuning (파생 클래스/디폴트에서 조정) =====
@@ -428,6 +473,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Targeting|SoftLock")
     TEnumAsByte<ECollisionChannel> SoftLockVisibilityChannel = ECC_Visibility;
 
+    // ===== Phase =====
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat")
+    bool bIsInvulnerable = false;
+
 private:
     // ===== Runtime (직접 수정 금지, ReadOnly만) =====
     /** 현재 Health. [0..MaxHealth] */
@@ -459,4 +508,14 @@ private:
     /** 현재 상태(상태 머신). */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
     ECharacterState CurrentState = ECharacterState::Idle;
+   
+    // ===== Death Tuning =====
+    FTimerHandle DeathFinishTimerHandle;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAnimMontage> ActiveDeathMontage = nullptr;
+
+    void FinishDeathSequence();
+
+    void OnDeathMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 };
