@@ -15,7 +15,7 @@ UCLASS()
 class MAGEBOSSDUEL_API ARunePrisonSkillActor : public AActor
 {
 	GENERATED_BODY()
-	
+
 public:
 	ARunePrisonSkillActor();
 

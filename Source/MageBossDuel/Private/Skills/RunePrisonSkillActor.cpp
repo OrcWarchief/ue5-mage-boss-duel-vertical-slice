@@ -15,6 +15,8 @@ ARunePrisonSkillActor::ARunePrisonSkillActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
+	Tags.Add(TEXT("BossSkillActor"));
+
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	RootComponent = SceneRoot;
 

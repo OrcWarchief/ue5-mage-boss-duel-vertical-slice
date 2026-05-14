@@ -79,6 +79,11 @@ ABaseCharacter::ABaseCharacter()
 	GetCharacterMovement()->bOrientRotationToMovement = false; 
 }
 
+void ABaseCharacter::SetInvulnerable(bool bNewInvulnerable)
+{
+	bIsInvulnerable = bNewInvulnerable;
+}
+
 void ABaseCharacter::BeginPlay()
 {
 	Super::BeginPlay();
@@ -98,12 +103,24 @@ void ABaseCharacter::InitializeStats_Implementation()
 	bIsAttacking = false;
 	bHasPerformedBasicAttackHit = false;
 	LastAttackTime = -9999.f;
+
+	bDeathSequenceStarted = false;
+	bDeathSequenceFinished = false;
+	ActiveDeathMontage = nullptr;
+
+	SetInvulnerable(false);
 	SetCharacterState(ECharacterState::Idle);
 
 	// 이동속도 초기화
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		MoveComp->MaxWalkSpeed = WalkSpeed;
+		MoveComp->SetMovementMode(MOVE_Walking);
+	}
+
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	}
 
 	BroadcastHealthChanged();
@@ -141,6 +158,11 @@ void ABaseCharacter::ApplyHitPayload(const FHitPayload& HitPayload, ABaseCharact
 	(void)DamageCauser; // TODO: distance/Knockback calculate
 
 	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (bIsInvulnerable)
 	{
 		return;
 	}
@@ -651,17 +673,30 @@ void ABaseCharacter::Die_Implementation()
 	{
 		return;
 	}
-	
+
+	if (bDeathSequenceStarted)
+	{
+		return;
+	}
+
+	bDeathSequenceStarted = true;
+	bDeathSequenceFinished = false;
+
 	// 상태 정리
-	bIsAttacking = false;
-	bHasPerformedBasicAttackHit = false;
+	CurrentHitReactionType = EHitReactionType::None;
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
 		World->GetTimerManager().ClearTimer(PoiseRestoreTimerHandle);
+		World->GetTimerManager().ClearTimer(DeathFinishTimerHandle);
 	}
 
+	bIsAttacking = false;
+	bHasPerformedBasicAttackHit = false;
+
 	CurrentHitReactionType = EHitReactionType::None;
+	SetInvulnerable(false);
 	SetCharacterState(ECharacterState::Dead);
 
 	// 이동 정지
@@ -671,13 +706,63 @@ void ABaseCharacter::Die_Implementation()
 	}
 
 	// 콜리전 비활성화
-	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	if (bDisableCapsuleCollisionOnDeath)
 	{
-		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+		{
+			Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
 	}
 
-	// PlayAnimMontage(DeathMontage);
-	OnDeathFinished();
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+
+	if (AnimInstance && bStopAllMontagesBeforeDeathMontage)
+	{
+		AnimInstance->StopAllMontages(0.05f);
+	}
+
+	OnCharacterDeathStarted.Broadcast(this);
+
+	if (AnimInstance && DeathMontage)
+	{
+		ActiveDeathMontage = DeathMontage;
+
+		const float PlayLength = AnimInstance->Montage_Play(DeathMontage, 1.0f);
+
+		if (PlayLength > 0.0f)
+		{
+			FOnMontageEnded MontageEndedDelegate;
+			MontageEndedDelegate.BindUObject(
+				this,
+				&ABaseCharacter::OnDeathMontageEnded
+			);
+
+			AnimInstance->Montage_SetEndDelegate(
+				MontageEndedDelegate,
+				DeathMontage
+			);
+
+			return;
+		}
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (DeathFallbackDuration <= 0.0f)
+		{
+			FinishDeathSequence();
+		}
+		else
+		{
+			World->GetTimerManager().SetTimer(
+				DeathFinishTimerHandle,
+				this,
+				&ABaseCharacter::FinishDeathSequence,
+				DeathFallbackDuration,
+				false
+			);
+		}
+	}
 }
 
 void ABaseCharacter::OnHitReaction_Implementation()
@@ -1184,4 +1269,35 @@ void ABaseCharacter::OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupte
 		*GetNameSafe(Montage),
 		bInterrupted ? 1 : 0);
 	EndDodge();
+}
+
+void ABaseCharacter::FinishDeathSequence()
+{
+	if (bDeathSequenceFinished)
+	{
+		return;
+	}
+
+	bDeathSequenceFinished = true;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DeathFinishTimerHandle);
+	}
+
+	ActiveDeathMontage = nullptr;
+
+	OnDeathFinished();
+
+	OnCharacterDeathFinished.Broadcast(this);
+}
+
+void ABaseCharacter::OnDeathMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != ActiveDeathMontage.Get())
+	{
+		return;
+	}
+
+	FinishDeathSequence();
 }

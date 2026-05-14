@@ -27,6 +27,14 @@ enum class ETeleportMontageStage : uint8
 	End UMETA(DisplayName = "End")
 };
 
+UENUM(BlueprintType)
+enum class EBossPhase : uint8
+{
+	Phase1 UMETA(DisplayName = "Phase 1"),
+	Phase2 UMETA(DisplayName = "Phase 2"),
+	Phase3 UMETA(DisplayName = "Phase 3")
+};
+
 USTRUCT(BlueprintType)
 struct FTeleportMontagePair
 {
@@ -63,6 +71,49 @@ struct FTeleportRuntime
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Teleport")
 	bool bMeshHidden = false;
+};
+
+UENUM(BlueprintType)
+enum class EBossSkillType : uint8
+{
+	None UMETA(DisplayName = "None"),
+
+	BasicAttack UMETA(DisplayName = "Basic Attack"),
+	Teleport UMETA(DisplayName = "Teleport"),
+	KnockdownFireball UMETA(DisplayName = "Knockdown Fireball"),
+	RuneVolley UMETA(DisplayName = "Rune Volley"),
+	RunePrison UMETA(DisplayName = "Rune Prison")
+};
+
+USTRUCT(BlueprintType)
+struct FBossSkillOption
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	EBossSkillType SkillType = EBossSkillType::None;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bEnabled = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float Weight = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float MinDistance = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float MaxDistance = 999999.0f;
+
+	// HP percent ±‚¡ÿ. 0.0 = 0%, 1.0 = 100%.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MinHealthPercent = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MaxHealthPercent = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAllowRepeat = false;
 };
 
 UCLASS()
@@ -148,7 +199,49 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Skill|RunePrison")
 	bool IsRunePrisonPatternActive() const;
 
+	// ===== Boss Brain =====
+
+	UFUNCTION(BlueprintCallable, Category = "BossAI")
+	void StartBossBrain();
+
+	UFUNCTION(BlueprintCallable, Category = "BossAI")
+	void StopBossBrain();
+
+	UFUNCTION(BlueprintCallable, Category = "BossAI")
+	bool TrySelectAndStartBossSkill();
+
+	UFUNCTION(BlueprintPure, Category = "BossAI")
+	bool IsBossBrainRunning() const;
+
+	UFUNCTION(BlueprintPure, Category = "BossAI")
+	EBossSkillType GetLastStartedBossSkill() const { return LastStartedBossSkill; }
+
+	// ===== Boss Phase =====
+
+	UFUNCTION(BlueprintPure, Category = "BossAI|Phase")
+	EBossPhase GetCurrentBossPhase() const { return CurrentBossPhase; }
+
+	UFUNCTION(BlueprintPure, Category = "BossAI|Phase")
+	bool IsPhaseTransitioning() const { return bIsPhaseTransitioning; }
+
+	UFUNCTION(BlueprintCallable, Category = "BossAI|Phase")
+	bool TryStartPendingPhaseTransition();
+
+	UFUNCTION(BlueprintCallable, Category = "BossAI|Phase")
+	void FinishBossPhaseTransition();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "BossAI|Phase")
+	void OnBossPhaseTransitionStarted(EBossPhase FromPhase, EBossPhase ToPhase);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "BossAI|Phase")
+	void OnBossPhaseChanged(EBossPhase NewPhase);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "BossAI|Phase")
+	void OnBossPhaseTransitionFinished(EBossPhase NewPhase);
+
 protected:
+	virtual void BeginPlay() override;
+
 	// ===== BaseCharacter hooks =====
 
 	virtual bool IsLockOnActive() const override;
@@ -321,6 +414,97 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Runtime")
 	float LastRunePrisonTime = -9999.0f;
 
+	// ===== Boss Brain Tuning =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAutoStartBossBrain = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAutoAcquirePlayerTargetOnBeginPlay = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
+	float BossBrainThinkInterval = 0.35f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float MinSecondsBetweenSkillStarts = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAllowBasicAttackFallback = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bBlockOtherSkillsDuringRunePrisonPattern = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bEnableBossBrainDebug = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	TArray<FBossSkillOption> BossSkillOptions;
+
+	// ===== Boss Brain Runtime =====
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Runtime")
+	EBossSkillType LastStartedBossSkill = EBossSkillType::None;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Runtime")
+	float LastBossSkillStartTime = -9999.0f;
+
+	// ===== Boss Phase Tuning =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase")
+	EBossPhase CurrentBossPhase = EBossPhase::Phase1;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float Phase2HealthThreshold = 0.75f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float Phase3HealthThreshold = 0.45f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Anim")
+	TObjectPtr<UAnimMontage> Phase2TransitionMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Anim")
+	TObjectPtr<UAnimMontage> Phase3TransitionMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase")
+	bool bInvulnerableDuringPhaseTransition = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase")
+	bool bStopBrainDuringPhaseTransition = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase")
+	bool bResetGlobalSkillDelayOnPhaseTransition = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float PhaseTransitionFallbackDuration = 1.0f;
+
+	// ===== Phase 2 Runtime Tuning =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Tuning", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
+	float Phase2MinSecondsBetweenSkillStarts = 0.85f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Tuning", meta = (ClampMin = "1", UIMin = "1"))
+	int32 Phase2RuneProjectileCount = 5;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Tuning", meta = (ClampMin = "0.01", UIMin = "0.01", Units = "s"))
+	float Phase2RuneActivationInterval = 0.17f;
+
+	// ===== Phase 3 Runtime Tuning =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Tuning", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
+	float Phase3MinSecondsBetweenSkillStarts = 0.7f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Tuning", meta = (ClampMin = "1", UIMin = "1"))
+	int32 Phase3RuneProjectileCount = 6;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Tuning", meta = (ClampMin = "0.01", UIMin = "0.01", Units = "s"))
+	float Phase3RuneActivationInterval = 0.14f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Tuning", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float Phase3TeleportCooldown = 4.5f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase|Tuning", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float Phase3RunePrisonCooldown = 12.0f;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> ActiveTeleportMontage = nullptr;
@@ -398,4 +582,48 @@ private:
 	void OnRunePrisonMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	FVector GetRunePrisonCenterLocation() const;
+
+	// ===== Boss Brain =====
+
+	FTimerHandle BossBrainTimerHandle;
+
+	void BossBrainThink();
+
+	bool IsAnyBossSkillActive() const;
+
+	bool BuildBossSkillCandidates(TArray<FBossSkillOption>& OutCandidates) const;
+
+	bool IsBossSkillOptionAllowed(const FBossSkillOption& Option) const;
+
+	bool CanStartBossSkill(EBossSkillType SkillType) const;
+
+	bool TryStartBossSkill(EBossSkillType SkillType);
+
+	int32 PickWeightedBossSkillIndex(const TArray<FBossSkillOption>& Candidates) const;
+
+	void InitializeDefaultBossSkillOptions();
+
+	// ===== Boss Phase	=====
+	UPROPERTY(Transient)
+	bool bIsPhaseTransitioning = false;
+
+	UPROPERTY(Transient)
+	EBossPhase PendingBossPhase = EBossPhase::Phase1;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> ActivePhaseTransitionMontage = nullptr;
+
+	FTimerHandle PhaseTransitionFallbackTimerHandle;
+
+	EBossPhase GetDesiredBossPhaseFromHealth() const;
+
+	bool ShouldEnterBossPhase(EBossPhase DesiredPhase) const;
+
+	UAnimMontage* GetPhaseTransitionMontage(EBossPhase TargetPhase) const;
+
+	void BeginBossPhaseTransition(EBossPhase TargetPhase);
+
+	void OnPhaseTransitionMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+	void ApplyBossPhaseTuning(EBossPhase NewPhase);
 };

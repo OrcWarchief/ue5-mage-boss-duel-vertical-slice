@@ -15,7 +15,7 @@ UCLASS()
 class MAGEBOSSDUEL_API ARunePrisonBeamSegment : public AActor
 {
 	GENERATED_BODY()
-	
+
 public:
 	ARunePrisonBeamSegment();
 
