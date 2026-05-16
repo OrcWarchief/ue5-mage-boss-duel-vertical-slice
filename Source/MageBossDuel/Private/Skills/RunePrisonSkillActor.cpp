@@ -80,6 +80,11 @@ void ARunePrisonSkillActor::InitializePrison(ABaseCharacter* InDamageCauser, AAc
 
 	SetActorLocation(PrisonCenter);
 
+	const float RequiredLifeSpan =
+		TelegraphDuration + ActiveDurationBeforeFinalBlast + CleanupDelayAfterFinalBlast + 1.0f;
+
+	SetLifeSpan(FMath::Max(RequiredLifeSpan, 1.0f));
+
 	const int32 ClampedRuneCount = FMath::Max(3, RuneCount);
 	RuneCount = ClampedRuneCount;
 
@@ -196,22 +201,28 @@ void ARunePrisonSkillActor::TriggerFinalBlast()
 
 	bFinalBlastTriggered = true;
 
-	ApplyFinalBlastDamage();
+	const FVector BlastOrigin = PrisonCenter;
+	const float BlastRadius = FinalBlastRadius;
 
-	OnPrisonFinalBlast(PrisonCenter, FinalBlastRadius);
+	OnPrisonFinalBlast(BlastOrigin, BlastRadius);
 
 	if (bDrawDebug)
 	{
-		DrawDebugSphere(
-			GetWorld(),
-			PrisonCenter,
-			FinalBlastRadius,
-			32,
-			FColor::Orange,
-			false,
-			1.0f
-		);
+		if (UWorld* World = GetWorld())
+		{
+			DrawDebugSphere(
+				World,
+				BlastOrigin,
+				BlastRadius,
+				32,
+				FColor::Orange,
+				false,
+				1.0f
+			);
+		}
 	}
+
+	ApplyFinalBlastDamage();
 
 	UWorld* World = GetWorld();
 	if (!World)

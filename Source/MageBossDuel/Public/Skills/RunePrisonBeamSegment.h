@@ -79,6 +79,5 @@ private:
 
 	TSet<TWeakObjectPtr<AActor>> DamagedActors;
 
-	bool IsIgnoredActor(AActor* Actor) const;
 	void ApplyDamageToActor(AActor* Actor);
 };

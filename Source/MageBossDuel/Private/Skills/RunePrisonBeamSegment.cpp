@@ -3,11 +3,14 @@
 
 #include "Skills/RunePrisonBeamSegment.h"
 
+#include "Combat/CombatTargetFilter.h"
 #include "Characters/Core/BaseCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+
+namespace CombatTargetFilter = MageBossDuel::CombatTargetFilter;
 
 ARunePrisonBeamSegment::ARunePrisonBeamSegment()
 {
@@ -126,39 +129,11 @@ void ARunePrisonBeamSegment::OnSegmentBeginOverlap(
 	ApplyDamageToActor(OtherActor);
 }
 
-bool ARunePrisonBeamSegment::IsIgnoredActor(AActor* Actor) const
-{
-	if (!IsValid(Actor))
-	{
-		return true;
-	}
-
-	if (Actor == this)
-	{
-		return true;
-	}
-
-	if (Actor == GetOwner())
-	{
-		return true;
-	}
-
-	if (Actor == GetInstigator())
-	{
-		return true;
-	}
-
-	if (Actor == DamageCauser.Get())
-	{
-		return true;
-	}
-
-	return false;
-}
-
 void ARunePrisonBeamSegment::ApplyDamageToActor(AActor* Actor)
 {
-	if (IsIgnoredActor(Actor))
+	ABaseCharacter* Causer = DamageCauser.Get();
+
+	if (CombatTargetFilter::ShouldIgnoreActorForDamage(Actor, this, Causer))
 	{
 		return;
 	}
@@ -168,15 +143,8 @@ void ARunePrisonBeamSegment::ApplyDamageToActor(AActor* Actor)
 		return;
 	}
 
-	ABaseCharacter* HitCharacter = Cast<ABaseCharacter>(Actor);
-	if (!HitCharacter || !HitCharacter->IsAlive())
-	{
-		return;
-	}
-
-	ABaseCharacter* Causer = DamageCauser.Get();
-
-	if (HitCharacter == Causer)
+	ABaseCharacter* HitCharacter = CombatTargetFilter::GetAliveDamageTarget(Actor);
+	if (!HitCharacter)
 	{
 		return;
 	}
