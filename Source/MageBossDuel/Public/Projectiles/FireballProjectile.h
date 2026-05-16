@@ -10,7 +10,6 @@
 class USphereComponent;
 class UStaticMeshComponent;
 class UProjectileMovementComponent;
-class ABaseCharacter;
 
 UCLASS()
 class MAGEBOSSDUEL_API AFireballProjectile : public AActor
@@ -19,8 +18,6 @@ class MAGEBOSSDUEL_API AFireballProjectile : public AActor
 	
 public:	
 	AFireballProjectile();
-	
-	virtual void Tick(float DeltaTime) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Skill|Fireball")
 	void Explode(AActor* DirectHitActor);
@@ -45,7 +42,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball|Hit")
 	FHitPayload SplashHitPayload;
 
-	// ===== Expolsion =====
+	// ===== Explosion =====
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball|Explosion", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float ExplosionRadius = 220.f;
@@ -79,7 +76,5 @@ protected:
 	void OnFireballExploded(const FVector& ExplosionOrigin, AActor* DirectHitActor);
 
 private:
-	bool IsIgnoredActor(AActor* Actor) const;
-	ABaseCharacter* GetDamageCausor() const;
 	void ApplyExplosionDamage(AActor* DirectHitActor, const FVector& ExplosionOrigin);
 };

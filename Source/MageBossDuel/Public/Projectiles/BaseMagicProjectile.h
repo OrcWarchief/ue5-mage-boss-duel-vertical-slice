@@ -55,9 +55,6 @@ protected:
 
 
 public:	
-	// Called every frame
-	virtual void Tick(float DeltaTime) override;
-
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void SetDamage(float NewDamage);
 

@@ -115,7 +115,6 @@ private:
 	float ActivationDelay = 0.0f;
 	float AimYawOffsetDegrees = 0.0f;
 
-	bool IsIgnoredActor(AActor* Actor) const;
 	FVector GetAimDirection() const;
 	void HandleImpact(AActor* HitActor, const FVector& ImpactLocation);
 };

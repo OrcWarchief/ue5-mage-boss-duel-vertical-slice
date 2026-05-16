@@ -3,12 +3,15 @@
 
 #include "Projectiles/DelayedRuneProjectile.h"
 
+#include "Combat/CombatTargetFilter.h"
 #include "Characters/Core/BaseCharacter.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "TimerManager.h"
+
+namespace CombatTargetFilter = MageBossDuel::CombatTargetFilter;
 
 ADelayedRuneProjectile::ADelayedRuneProjectile()
 {
@@ -180,7 +183,7 @@ void ADelayedRuneProjectile::OnProjectileBeginOverlap(
 		return;
 	}
 
-	if (IsIgnoredActor(OtherActor))
+	if (CombatTargetFilter::ShouldIgnoreActorForDamage(OtherActor, this, DamageCauser.Get()))
 	{
 		return;
 	}
@@ -205,7 +208,7 @@ void ADelayedRuneProjectile::OnProjectileHit(
 		return;
 	}
 
-	if (OtherActor && IsIgnoredActor(OtherActor))
+	if (OtherActor && CombatTargetFilter::ShouldIgnoreActorForDamage(OtherActor, this, DamageCauser.Get()))
 	{
 		return;
 	}
@@ -215,36 +218,6 @@ void ADelayedRuneProjectile::OnProjectileHit(
 		: GetActorLocation();
 
 	HandleImpact(OtherActor, ImpactLocation);
-}
-
-bool ADelayedRuneProjectile::IsIgnoredActor(AActor* Actor) const
-{
-	if (!IsValid(Actor))
-	{
-		return true;
-	}
-
-	if (Actor == this)
-	{
-		return true;
-	}
-
-	if (Actor == GetOwner())
-	{
-		return true;
-	}
-
-	if (Actor == GetInstigator())
-	{
-		return true;
-	}
-
-	if (Actor == DamageCauser.Get())
-	{
-		return true;
-	}
-
-	return false;
 }
 
 FVector ADelayedRuneProjectile::GetAimDirection() const
@@ -290,13 +263,13 @@ void ADelayedRuneProjectile::HandleImpact(AActor* HitActor, const FVector& Impac
 
 	SetActorEnableCollision(false);
 
-	if (ABaseCharacter* HitCharacter = Cast<ABaseCharacter>(HitActor))
-	{
-		ABaseCharacter* Causor = DamageCauser.Get();
+	ABaseCharacter* Causer = DamageCauser.Get();
 
-		if (HitCharacter->IsAlive() && HitCharacter != Causor)
+	if (ABaseCharacter* HitCharacter = CombatTargetFilter::GetAliveDamageTarget(HitActor))
+	{
+		if (!CombatTargetFilter::ShouldIgnoreActorForDamage(HitCharacter, this, Causer))
 		{
-			HitCharacter->ApplyHitPayload(HitPayload, Causor);
+			HitCharacter->ApplyHitPayload(HitPayload, Causer);
 		}
 	}
 

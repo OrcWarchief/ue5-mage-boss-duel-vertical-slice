@@ -225,8 +225,6 @@ void ADuelEncounterManager::HandleBossDeathFinished(ABaseCharacter* DeadCharacte
 	{
 		EndEncounter(EDuelEndResult::Victory);
 	}
-
-	EndEncounter(EDuelEndResult::Victory);
 }
 
 void ADuelEncounterManager::HandlePlayerDeathStarted(ABaseCharacter* DeadCharacter)
