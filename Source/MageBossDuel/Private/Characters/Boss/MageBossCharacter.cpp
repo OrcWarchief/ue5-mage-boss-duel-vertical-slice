@@ -529,19 +529,23 @@ void AMageBossCharacter::SpawnRunePrison()
 	}
 
 	UWorld* World = GetWorld();
-	if (!World || !RunePrisonActorClass)
+	if (!World)
 	{
 		return;
 	}
 
-	bRunePrisonSpawned = true;
+	if (!RunePrisonActorClass)
+	{
+		return;
+	}
 
 	const FVector PrisonCenter = GetRunePrisonCenterLocation();
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
 	SpawnParams.Instigator = this;
-	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	SpawnParams.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
 	ARunePrisonSkillActor* PrisonActor =
 		World->SpawnActor<ARunePrisonSkillActor>(
@@ -556,6 +560,7 @@ void AMageBossCharacter::SpawnRunePrison()
 		return;
 	}
 
+	bRunePrisonSpawned = true;
 	ActiveRunePrisonActor = PrisonActor;
 
 	PrisonActor->InitializePrison(

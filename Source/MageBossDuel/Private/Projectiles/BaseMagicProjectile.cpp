@@ -108,13 +108,6 @@ void ABaseMagicProjectile::OnProjectileHit(UPrimitiveComponent* HitComponent, AA
 	Destroy();
 }
 
-// Called every frame
-void ABaseMagicProjectile::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
-}
-
 void ABaseMagicProjectile::SetDamage(float NewDamage)
 {
 	HitPayload.Damage = FMath::Max(0.0f, NewDamage);

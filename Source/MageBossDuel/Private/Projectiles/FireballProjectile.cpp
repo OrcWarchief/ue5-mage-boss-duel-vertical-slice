@@ -2,6 +2,8 @@
 
 
 #include "Projectiles/FireballProjectile.h"
+
+#include "Combat/CombatTargetFilter.h"
 #include "Characters/Core/BaseCharacter.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -9,6 +11,8 @@
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+
+namespace CombatTargetFilter = MageBossDuel::CombatTargetFilter;
 
 AFireballProjectile::AFireballProjectile()
 {
@@ -78,11 +82,6 @@ void AFireballProjectile::BeginPlay()
 	}
 }
 
-void AFireballProjectile::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-}
-
 void AFireballProjectile::OnProjectileBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	if (bHasExploded)
@@ -90,7 +89,7 @@ void AFireballProjectile::OnProjectileBeginOverlap(UPrimitiveComponent* Overlapp
 		return;
 	}
 
-	if (IsIgnoredActor(OtherActor))
+	if (CombatTargetFilter::ShouldIgnoreActorForDamage(OtherActor, this))
 	{
 		return;
 	}
@@ -105,7 +104,7 @@ void AFireballProjectile::OnProjectileHit(UPrimitiveComponent* HitComponent, AAc
 		return;
 	}
 
-	if (IsIgnoredActor(OtherActor))
+	if (CombatTargetFilter::ShouldIgnoreActorForDamage(OtherActor, this))
 	{
 		return;
 	}
@@ -164,19 +163,19 @@ void AFireballProjectile::ApplyExplosionDamage(AActor* DirectHitActor, const FVe
 		return;
 	}
 
-	ABaseCharacter* DamageCausor = GetDamageCausor();
+	ABaseCharacter* DamageCauser = CombatTargetFilter::ResolveDamageCauser(this);
 
 	TSet<AActor*> DamagedActors;
 
 	// ===== Direct Hit =====
 
-	if (!IsIgnoredActor(DirectHitActor))
+	if (!CombatTargetFilter::ShouldIgnoreActorForDamage(DirectHitActor, this, DamageCauser))
 	{
 		if (ABaseCharacter* DirectHitCharacter = Cast<ABaseCharacter>(DirectHitActor))
 		{
-			if (DirectHitCharacter->IsAlive() && DirectHitCharacter != DamageCausor)
+			if (DirectHitCharacter->IsAlive() && DirectHitCharacter != DamageCauser)
 			{
-				DirectHitCharacter->ApplyHitPayload(DirectHitPayload, DamageCausor);
+				DirectHitCharacter->ApplyHitPayload(DirectHitPayload, DamageCauser);
 				DamagedActors.Add(DirectHitCharacter);
 			}
 		}
@@ -189,17 +188,9 @@ void AFireballProjectile::ApplyExplosionDamage(AActor* DirectHitActor, const FVe
 	FCollisionObjectQueryParams ObjectQueryParams;
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
 
-	FCollisionQueryParams QueryParams(FName(TEXT("FireballExplosion")), false, this);
+	FCollisionQueryParams QueryParams(FName(TEXT("FireballExplosion")), false);
 
-	if (AActor* OwnerActor = GetOwner())
-	{
-		QueryParams.AddIgnoredActor(OwnerActor);
-	}
-
-	if (AActor* InstigatorActor = GetInstigator())
-	{
-		QueryParams.AddIgnoredActor(InstigatorActor);
-	}
+	CombatTargetFilter::AddIgnoredActorsForDamageQuery(QueryParams, this, DamageCauser);
 
 	const FCollisionShape ExplosionShape = FCollisionShape::MakeSphere(ExplosionRadius);
 
@@ -220,8 +211,8 @@ void AFireballProjectile::ApplyExplosionDamage(AActor* DirectHitActor, const FVe
 	for (const FOverlapResult& Result : OverlapResults)
 	{
 		AActor* OverlappedActor = Result.GetActor();
-
-		if (!IsValid(OverlappedActor))
+		
+		if (CombatTargetFilter::ShouldIgnoreActorForDamage(OverlappedActor, this, DamageCauser))
 		{
 			continue;
 		}
@@ -231,62 +222,13 @@ void AFireballProjectile::ApplyExplosionDamage(AActor* DirectHitActor, const FVe
 			continue;
 		}
 
-		if (IsIgnoredActor(OverlappedActor))
+		ABaseCharacter* HitCharacter = CombatTargetFilter::GetAliveDamageTarget(OverlappedActor);
+		if (!HitCharacter)
 		{
 			continue;
 		}
 
-		ABaseCharacter* HitCharacter = Cast<ABaseCharacter>(OverlappedActor);
-		if (!HitCharacter || !HitCharacter->IsAlive())
-		{
-			continue;
-		}
-		if (HitCharacter == DamageCausor)
-		{
-			continue;
-		}
-
-		HitCharacter->ApplyHitPayload(SplashHitPayload, DamageCausor);
+		HitCharacter->ApplyHitPayload(SplashHitPayload, DamageCauser);
 		DamagedActors.Add(HitCharacter);
 	}
-}
-
-bool AFireballProjectile::IsIgnoredActor(AActor* Actor) const
-{
-	if (!IsValid(Actor))
-	{
-		return true;
-	}
-
-	if (Actor == this)
-	{
-		return true;
-	}
-
-	if (Actor == GetOwner())
-	{
-		return true;
-	}
-
-	if (Actor == GetInstigator())
-	{
-		return true;
-	}
-
-	return false;
-}
-
-ABaseCharacter* AFireballProjectile::GetDamageCausor() const
-{
-	if (ABaseCharacter* OwnerCharacter = Cast<ABaseCharacter>(GetOwner()))
-	{
-		return OwnerCharacter;
-	}
-
-	if (ABaseCharacter* InstigatorCharacter = Cast<ABaseCharacter>(GetInstigator()))
-	{
-		return InstigatorCharacter;
-	}
-
-	return nullptr;
 }

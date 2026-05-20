@@ -3,12 +3,14 @@
 
 #include "GamePlay/DuelEncounterManager.h"
 
+#include "Blueprint/UserWidget.h"
 #include "Characters/Boss/MageBossCharacter.h"
 #include "Characters/Core/BaseCharacter.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+#include "UI/HUD/BossEncounterHUDWidget.h"
 
 ADuelEncounterManager::ADuelEncounterManager()
 {
@@ -22,7 +24,16 @@ void ADuelEncounterManager::StartEncounter()
 		return;
 	}
 	bEncounterActive = true;
+	bEndFlowStarted = false;
 	CurrentEndResult = EDuelEndResult::None;
+
+	if (ActiveEndWidget)
+	{
+		ActiveEndWidget->RemoveFromParent();
+		ActiveEndWidget = nullptr;
+	}
+
+	ClearBossEncounterHUD();
 
 	if (BossCharacter && PlayerCharacter)
 	{
@@ -31,6 +42,8 @@ void ADuelEncounterManager::StartEncounter()
 	}
 
 	SetPlayerInputLocked(false, false);
+
+	ShowBossEncounterHUD();
 
 	OnEncounterStarted();
 }
@@ -100,6 +113,14 @@ void ADuelEncounterManager::EndEncounter(EDuelEndResult Result)
 
 void ADuelEncounterManager::RestartEncounter()
 {
+	ClearBossEncounterHUD();
+
+	if (ActiveEndWidget)
+	{
+		ActiveEndWidget->RemoveFromParent();
+		ActiveEndWidget = nullptr;
+	}
+
 	const FString CurrentLevelName = UGameplayStatics::GetCurrentLevelName(this, true);
 
 	const FName LevelToLoad = 
@@ -172,7 +193,136 @@ void ADuelEncounterManager::BindDeathEvents()
 
 void ADuelEncounterManager::ShowEndScreen()
 {
-	OnEndScreenReady(CurrentEndResult);
+	HideBossEncounterHUD();
+
+	if (ActiveEndWidget)
+	{
+		ActiveEndWidget->RemoveFromParent();
+		ActiveEndWidget = nullptr;
+	}
+
+	TSubclassOf<UUserWidget> WidgetClass = nullptr;
+
+	switch (CurrentEndResult)
+	{
+	case EDuelEndResult::Victory:
+		WidgetClass = VictoryWidgetClass;
+		break;
+
+	case EDuelEndResult::Defeat:
+		WidgetClass = DefeatWidgetClass;
+		break;
+
+	default:
+		break;
+	}
+
+	if (WidgetClass)
+	{
+		APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+		if (PC)
+		{
+			ActiveEndWidget = CreateWidget<UUserWidget>(PC, WidgetClass);
+			if (ActiveEndWidget)
+			{
+				ActiveEndWidget->AddToViewport(EndWidgetZOrder);
+			}
+		}
+	}
+
+	OnEndScreenReady(CurrentEndResult); // SFX / Camera / Shake 등 엔드 스크린과 동시에 시작되어야 하는 요소들을 블루프린트에서 처리할 수 있도록 이벤트 호출 
+}
+
+void ADuelEncounterManager::ShowBossEncounterHUD()
+{
+	if (!BossEncounterHUDWidgetClass)
+	{
+		return;
+	}
+
+	if (!BossCharacter)
+	{
+		return;
+	}
+
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC)
+	{
+		return;
+	}
+
+	if (!ActiveBossEncounterHUDWidget)
+	{
+		ActiveBossEncounterHUDWidget =
+			CreateWidget<UBossEncounterHUDWidget>(
+				PC,
+				BossEncounterHUDWidgetClass
+			);
+
+		if (ActiveBossEncounterHUDWidget)
+		{
+			ActiveBossEncounterHUDWidget->AddToViewport(BossEncounterHUDZOrder);
+		}
+	}
+
+	if (ActiveBossEncounterHUDWidget)
+	{
+		ActiveBossEncounterHUDWidget->InitializeFromBoss(BossCharacter);
+	}
+}
+
+void ADuelEncounterManager::HideBossEncounterHUD()
+{
+	if (!ActiveBossEncounterHUDWidget)
+	{
+		return;
+	}
+
+	ActiveBossEncounterHUDWidget->BeginHide();
+
+	UWorld* World = GetWorld();
+	if (!World || BossEncounterHUDHideRemoveDelay <= 0.0f)
+	{
+		RemoveBossEncounterHUD();
+		return;
+	}
+
+	World->GetTimerManager().ClearTimer(BossEncounterHUDRemoveTimerHandle);
+	World->GetTimerManager().SetTimer(
+		BossEncounterHUDRemoveTimerHandle,
+		this,
+		&ADuelEncounterManager::RemoveBossEncounterHUD,
+		BossEncounterHUDHideRemoveDelay,
+		false
+	);
+}
+
+void ADuelEncounterManager::RemoveBossEncounterHUD()
+{
+	if (!ActiveBossEncounterHUDWidget)
+	{
+		return;
+	}
+
+	ActiveBossEncounterHUDWidget->RemoveFromParent();
+	ActiveBossEncounterHUDWidget = nullptr;
+}
+
+void ADuelEncounterManager::ClearBossEncounterHUD()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BossEncounterHUDRemoveTimerHandle);
+	}
+
+	if (!ActiveBossEncounterHUDWidget)
+	{
+		return;
+	}
+
+	ActiveBossEncounterHUDWidget->ClearBoss();
+	ActiveBossEncounterHUDWidget->RemoveFromParent();
+	ActiveBossEncounterHUDWidget = nullptr;
 }
 
 void ADuelEncounterManager::DestroyRemainingBossSkillActors()
@@ -225,8 +375,6 @@ void ADuelEncounterManager::HandleBossDeathFinished(ABaseCharacter* DeadCharacte
 	{
 		EndEncounter(EDuelEndResult::Victory);
 	}
-
-	EndEncounter(EDuelEndResult::Victory);
 }
 
 void ADuelEncounterManager::HandlePlayerDeathStarted(ABaseCharacter* DeadCharacter)

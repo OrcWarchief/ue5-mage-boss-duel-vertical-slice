@@ -150,6 +150,4 @@ private:
 
 	void SpawnBeamSegments();
 	void ApplyFinalBlastDamage();
-
-	bool IsIgnoredActor(AActor* Actor) const;
 };
