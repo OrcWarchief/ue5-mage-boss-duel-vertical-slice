@@ -8,6 +8,8 @@
 
 class ABaseCharacter;
 class AMageBossCharacter;
+class UUserWidget;
+class UBossEncounterHUDWidget;
 
 UENUM(BlueprintType)
 enum class EDuelEndResult : uint8
@@ -46,6 +48,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Duel")
 	EDuelEndResult GetCurrentEndResult() const { return CurrentEndResult; }
 
+	UFUNCTION(BlueprintPure, Category = "Duel|References")
+	ABaseCharacter* GetEncounterPlayer() const { return PlayerCharacter; }
+
+	UFUNCTION(BlueprintPure, Category = "Duel|References")
+	AMageBossCharacter* GetEncounterBoss() const { return BossCharacter; }
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -79,6 +87,24 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|Timing", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
 	float DefeatScreenDelay = 0.75f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|UI")
+	TSubclassOf<UUserWidget> VictoryWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|UI")
+	TSubclassOf<UUserWidget> DefeatWidgetClass;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|UI")
+	TSubclassOf<UBossEncounterHUDWidget> BossEncounterHUDWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|UI")
+	int32 BossEncounterHUDZOrder = 50;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|UI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float BossEncounterHUDHideRemoveDelay = 0.45f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|UI")
+	int32 EndWidgetZOrder = 100;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|Restart")
 	FName RestartMapName = NAME_None;
 
@@ -90,6 +116,12 @@ protected:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Duel|Runtime")
 	EDuelEndResult CurrentEndResult = EDuelEndResult::None;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Duel|Runtime")
+	TObjectPtr<UUserWidget> ActiveEndWidget = nullptr;
+	
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Duel|Runtime")
+	TObjectPtr<UBossEncounterHUDWidget> ActiveBossEncounterHUDWidget = nullptr;
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Duel")
 	void OnEncounterStarted();
@@ -111,6 +143,7 @@ protected:
 
 private:
 	FTimerHandle EndScreenTimerHandle;
+	FTimerHandle BossEncounterHUDRemoveTimerHandle;
 
 	UFUNCTION()
 	void HandleBossDeathStarted(ABaseCharacter* DeadCharacter);
@@ -125,11 +158,11 @@ private:
 	void HandlePlayerDeathFinished(ABaseCharacter* DeadCharacter);
 
 	void AutoFindReferences();
-
 	void BindDeathEvents();
-
 	void ShowEndScreen();
-
+	void ShowBossEncounterHUD();
+	void HideBossEncounterHUD();
+	void RemoveBossEncounterHUD();
+	void ClearBossEncounterHUD();
 	void DestroyRemainingBossSkillActors();
-
 };

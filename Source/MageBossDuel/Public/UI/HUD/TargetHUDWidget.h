@@ -52,6 +52,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Boss")
 	float BossLagBarInterpSpeed = 4.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|Boss|Debug", meta = (DisplayName = "Show Boss Lock-On Health Bar"))
+	bool bShowBossLockOnHealthBar = false;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "HUD|NormalTarget")
 	FVector2D NormalTargetBarScreenOffset = FVector2D(0.f, -6.f);
 
@@ -75,6 +78,9 @@ private:
 	void UpdateLockOnMarker(const FVector& WorldLocation);
 	void UpdateNormalTargetBarPosition(ABaseCharacter* TargetCharacter);
 	void UpdateHealthWidgets(ABaseCharacter* TargetCharacter);
+	// ===== Boss Lock-On Health Bar =====
+	void HideBossLockOnHealthBar();
+	void ResetBossLagBarState();
 	// ===== Boss Lag Bar =====
 	void ResetBossLagBar(ABaseCharacter* BossCharacter, float CurrentHealthPercent);
 	void UpdateBossLagBar(ABaseCharacter* BossCharacter, float CurrentHealthPercent);

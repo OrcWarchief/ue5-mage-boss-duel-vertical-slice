@@ -71,19 +71,7 @@ void UTargetHUDWidget::HideAllTargetUI()
 		NormalTargetBarBox->SetVisibility(ESlateVisibility::Collapsed);
 	}
 
-	if (BossBarBox)
-	{
-		if (BossNameText)
-		{
-			BossNameText->SetText(FText::GetEmpty());
-		}
-		BossBarBox->SetVisibility(ESlateVisibility::Collapsed);
-	}
-
-	CachedBossTarget = nullptr;
-	BossLagDisplayedPercent = 1.f;
-	LastBossActualPercent = 1.f;
-	BossLagDelayRemaining = 0.f;
+	HideBossLockOnHealthBar();
 }
 
 void UTargetHUDWidget::UpdateTargetUI()
@@ -193,6 +181,12 @@ void UTargetHUDWidget::UpdateHealthWidgets(ABaseCharacter* TargetCharacter)
 			NormalTargetBarBox->SetVisibility(ESlateVisibility::Collapsed);
 		}
 
+		if (!bShowBossLockOnHealthBar)
+		{
+			HideBossLockOnHealthBar();
+			return;
+		}
+
 		if (BossBarBox)
 		{
 			BossBarBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
@@ -213,29 +207,43 @@ void UTargetHUDWidget::UpdateHealthWidgets(ABaseCharacter* TargetCharacter)
 
 			BossNameText->SetText(DisplayName);
 		}
+
+		return;
 	}
-	else
+	HideBossLockOnHealthBar();
+
+	if (NormalTargetBarBox)
 	{
-		CachedBossTarget = nullptr;
-		BossLagDisplayedPercent = 1.f;
-		LastBossActualPercent = 1.f;
-		BossLagDelayRemaining = 0.f;
-
-		if (BossBarBox)
-		{
-			BossBarBox->SetVisibility(ESlateVisibility::Collapsed);
-		}
-
-		if (NormalTargetBarBox)
-		{
-			NormalTargetBarBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-		}
-
-		if (NormalTargetHealthBar)
-		{
-			NormalTargetHealthBar->SetPercent(HealthPercent);
-		}
+		NormalTargetBarBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	}
+
+	if (NormalTargetHealthBar)
+	{
+		NormalTargetHealthBar->SetPercent(HealthPercent);
+	}
+}
+
+void UTargetHUDWidget::HideBossLockOnHealthBar()
+{
+	if (BossBarBox)
+	{
+		BossBarBox->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	if (BossNameText)
+	{
+		BossNameText->SetText(FText::GetEmpty());
+	}
+
+	ResetBossLagBarState();
+}
+
+void UTargetHUDWidget::ResetBossLagBarState()
+{
+	CachedBossTarget = nullptr;
+	BossLagDisplayedPercent = 1.f;
+	LastBossActualPercent = 1.f;
+	BossLagDelayRemaining = 0.f;
 }
 
 void UTargetHUDWidget::ResetBossLagBar(ABaseCharacter* BossCharacter, float CurrentHealthPercent)
