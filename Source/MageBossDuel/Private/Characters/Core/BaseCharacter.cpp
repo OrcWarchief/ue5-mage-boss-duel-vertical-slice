@@ -99,6 +99,7 @@ void ABaseCharacter::ReviveForRespawn()
 	{
 		if (ActiveDeathMontage)
 		{
+
 			FOnMontageEnded EmptyMontageEndedDelegate;
 			AnimInstance->Montage_SetEndDelegate(EmptyMontageEndedDelegate, ActiveDeathMontage);
 		}

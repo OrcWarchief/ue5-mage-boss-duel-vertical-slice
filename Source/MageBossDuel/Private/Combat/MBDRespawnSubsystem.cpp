@@ -15,6 +15,13 @@ void UMBDRespawnSubsystem::SetActiveRestPoint(FName RestPointId, FName LevelName
 	ActiveRestPoint.RestPointId = RestPointId;
 	ActiveRestPoint.LevelName = LevelName;
 	ActiveRestPoint.RespawnTransform = RespawnTransform;
+
+	UE_LOG(LogTemp, Warning, TEXT("[RespawnSubsystem] SetActiveRestPoint Id=%s Level=%s Location=%s Rotation=%s"),
+		*RestPointId.ToString(),
+		*LevelName.ToString(),
+		*RespawnTransform.GetLocation().ToString(),
+		*RespawnTransform.Rotator().ToString()
+	);
 }
 
 void UMBDRespawnSubsystem::ClearActiveRestPoint()
@@ -42,8 +49,14 @@ bool UMBDRespawnSubsystem::RespawnPlayerAtActiveRestPoint(APlayerController* Pla
 
 	const FName CurrentLevelName = FName(*UGameplayStatics::GetCurrentLevelName(PlayerController, true));
 
+	UE_LOG(LogTemp, Warning, TEXT("[RespawnSubsystem] Level check. SavedLevel=%s CurrentLevel=%s"),
+		*ActiveRestPoint.LevelName.ToString(),
+		*CurrentLevelName.ToString()
+	);
+
 	if (!ActiveRestPoint.LevelName.IsNone() && ActiveRestPoint.LevelName != CurrentLevelName)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[RespawnSubsystem] Failed: Level mismatch"));
 		return false;
 	}
 
@@ -53,6 +66,12 @@ bool UMBDRespawnSubsystem::RespawnPlayerAtActiveRestPoint(APlayerController* Pla
 	FRotator RespawnRotation = RespawnTransform.GetRotation().Rotator();
 	RespawnRotation.Pitch = 0.0f; // Ensure the player doesn't spawn with an unintended pitch
 	RespawnRotation.Roll = 0.0f;  // Ensure the player doesn't spawn with an unintended roll
+
+	UE_LOG(LogTemp, Warning, TEXT("[RespawnSubsystem] Trying TeleportTo Location=%s Rotation=%s Pawn=%s"),
+		*RespawnLocation.ToString(),
+		*RespawnRotation.ToString(),
+		*GetNameSafe(PlayerPawn)
+	);
 
 	if (UPawnMovementComponent* MovementComponent = PlayerPawn->GetMovementComponent())
 	{
@@ -65,6 +84,7 @@ bool UMBDRespawnSubsystem::RespawnPlayerAtActiveRestPoint(APlayerController* Pla
 		false, 
 		true
 	);
+	UE_LOG(LogTemp, Warning, TEXT("[RespawnSubsystem] TeleportTo returned %d"), bTeleported);
 
 	if (!bTeleported)
 	{

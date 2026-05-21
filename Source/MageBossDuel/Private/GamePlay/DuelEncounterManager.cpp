@@ -6,11 +6,14 @@
 #include "Blueprint/UserWidget.h"
 #include "Characters/Boss/MageBossCharacter.h"
 #include "Characters/Core/BaseCharacter.h"
+#include "Combat/MBDRespawnSubsystem.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "UI/HUD/BossEncounterHUDWidget.h"
+#include "UI/HUD/DuelEndScreenWidget.h"
 
 ADuelEncounterManager::ADuelEncounterManager()
 {
@@ -131,6 +134,93 @@ void ADuelEncounterManager::RestartEncounter()
 	UGameplayStatics::OpenLevel(this, LevelToLoad);
 }
 
+bool ADuelEncounterManager::RequestRespawnFromDefeat()
+{
+	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] RequestRespawnFromDefeat called. CurrentEndResult=%d Active=%d EndFlowStarted=%d"),
+		static_cast<int32>(CurrentEndResult),
+		bEncounterActive,
+		bEndFlowStarted
+	);
+
+	if (CurrentEndResult != EDuelEndResult::Defeat)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] Failed: CurrentEndResult is not Defeat"));
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
+
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] PlayerController=%s Pawn=%s"),
+		*GetNameSafe(PC),
+		PC ? *GetNameSafe(PC->GetPawn()) : TEXT("None")
+	);
+
+	if (!PC)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] Failed: PlayerController is null"));
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
+
+	UGameInstance* GameInstance = GetGameInstance();
+	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] GameInstance=%s"), *GetNameSafe(GameInstance));
+
+	if (!GameInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] Failed: GameInstance is null"));
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
+
+	UMBDRespawnSubsystem* RespawnSubsystem =
+		GameInstance->GetSubsystem<UMBDRespawnSubsystem>();
+
+	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] RespawnSubsystem=%s HasRestPoint=%d"),
+		*GetNameSafe(RespawnSubsystem),
+		RespawnSubsystem ? RespawnSubsystem->HasActiveRestPoint() : false
+	);
+
+	if (!RespawnSubsystem)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] Failed: RespawnSubsystem is null"));
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
+
+	const bool bRespawned =
+		RespawnSubsystem->RespawnPlayerAtActiveRestPoint(PC);
+
+	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] RespawnSubsystem returned %d"), bRespawned);
+
+	if (!bRespawned)
+	{
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
+
+	if (ActiveEndWidget)
+	{
+		ActiveEndWidget->RemoveFromParent();
+		ActiveEndWidget = nullptr;
+	}
+
+	ClearBossEncounterHUD();
+
+	CurrentEndResult = EDuelEndResult::None;
+	bEndFlowStarted = false;
+	bEncounterActive = false;
+
+	SetPlayerInputLocked(false, false);
+
+	FInputModeGameOnly InputMode;
+	PC->SetInputMode(InputMode);
+	PC->bShowMouseCursor = false;
+
+	OnRespawnFromDefeatSucceeded();
+
+	return true;
+}
+
 void ADuelEncounterManager::SetPlayerInputLocked(bool bLocked, bool bLockLook)
 {
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
@@ -201,32 +291,51 @@ void ADuelEncounterManager::ShowEndScreen()
 		ActiveEndWidget = nullptr;
 	}
 
-	TSubclassOf<UUserWidget> WidgetClass = nullptr;
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC)
+	{
+		OnEndScreenReady(CurrentEndResult);
+		return;
+	}
 
 	switch (CurrentEndResult)
 	{
 	case EDuelEndResult::Victory:
-		WidgetClass = VictoryWidgetClass;
+		if (VictoryWidgetClass)
+		{
+			ActiveEndWidget = CreateWidget<UUserWidget>(PC, VictoryWidgetClass);
+		}
 		break;
 
 	case EDuelEndResult::Defeat:
-		WidgetClass = DefeatWidgetClass;
+		if (DefeatWidgetClass)
+		{
+			UDuelEndScreenWidget* DefeatWidget = CreateWidget<UDuelEndScreenWidget>(PC, DefeatWidgetClass);
+
+			if (DefeatWidget)
+			{
+				DefeatWidget->InitializeFromEncounterManager(this, CurrentEndResult);
+				ActiveEndWidget = DefeatWidget;
+			}
+		}
 		break;
 
 	default:
 		break;
 	}
 
-	if (WidgetClass)
+	if (ActiveEndWidget)
 	{
-		APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-		if (PC)
+		ActiveEndWidget->AddToViewport(EndWidgetZOrder);
+
+		if (CurrentEndResult == EDuelEndResult::Defeat)
 		{
-			ActiveEndWidget = CreateWidget<UUserWidget>(PC, WidgetClass);
-			if (ActiveEndWidget)
-			{
-				ActiveEndWidget->AddToViewport(EndWidgetZOrder);
-			}
+			FInputModeUIOnly InputMode;
+			//InputMode.SetWidgetToFocus(ActiveEndWidget->TakeWidget()); 이후에 패드 입력 고려
+			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+
+			PC->SetInputMode(InputMode);
+			PC->bShowMouseCursor = true;
 		}
 	}
 
