@@ -84,6 +84,70 @@ void ABaseCharacter::SetInvulnerable(bool bNewInvulnerable)
 	bIsInvulnerable = bNewInvulnerable;
 }
 
+void ABaseCharacter::ReviveForRespawn()
+{
+	SetLifeSpan(0.f); // 기존에 사망으로 설정된 수명 제거
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(HitRecoveryTimerHandle);
+		World->GetTimerManager().ClearTimer(PoiseRestoreTimerHandle);
+		World->GetTimerManager().ClearTimer(DeathFinishTimerHandle);
+	}
+
+	if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+	{
+		if (ActiveDeathMontage)
+		{
+			FOnMontageEnded EmptyMontageEndedDelegate;
+			AnimInstance->Montage_SetEndDelegate(EmptyMontageEndedDelegate, ActiveDeathMontage);
+		}
+
+		AnimInstance->StopAllMontages(0.05f);
+	}
+
+	ActiveDeathMontage = nullptr;
+
+	bDeathSequenceStarted = false;
+	bDeathSequenceFinished = false;
+
+	bIsAttacking = false;
+	bHasPerformedBasicAttackHit = false;
+	bIsRunning = false;
+
+	CurrentDodgeDirection = EDodgeDirection::None;
+	CurrentHitReactionType = EHitReactionType::None;
+
+	SetInvulnerable(false);
+	
+	// SetHealth/ Mana/ Poise()는 Dead에서 상태 변경 막음으로, 여기서 직접 설정.
+	CurrentHealth = MaxHealth;
+	CurrentMana = MaxMana;
+	CurrentPoise = MaxPoise;
+
+	// SetCharacterState()는	 Dead에서 상태 변경 막음으로, 여기서 직접 설정.
+	CurrentState = ECharacterState::Idle;
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->MaxWalkSpeed = WalkSpeed;
+		MoveComp->SetMovementMode(MOVE_Walking);
+	}
+
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	}
+
+	SetActorHiddenInGame(false);
+
+	BroadcastHealthChanged();
+	BroadcastManaChanged();
+
+	OnRevivedForRespawn();
+}
+
 void ABaseCharacter::BeginPlay()
 {
 	Super::BeginPlay();

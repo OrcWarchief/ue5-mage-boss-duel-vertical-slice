@@ -3,6 +3,7 @@
 
 #include "Combat/MBDRespawnSubsystem.h"
 
+#include "Characters/Core/BaseCharacter.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -75,6 +76,11 @@ bool UMBDRespawnSubsystem::RespawnPlayerAtActiveRestPoint(APlayerController* Pla
 	if (UPawnMovementComponent* MovementComponent = PlayerPawn->GetMovementComponent())
 	{
 		MovementComponent->StopMovementImmediately();
+	}
+
+	if (ABaseCharacter* BaseCharacter = Cast<ABaseCharacter>(PlayerPawn))
+	{
+		BaseCharacter->ReviveForRespawn();
 	}
 
 	return true;
