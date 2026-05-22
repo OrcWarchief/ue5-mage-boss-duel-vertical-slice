@@ -60,7 +60,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Respawn")
 	bool RespawnPlayerAtActiveRestPoint(APlayerController* PlayerController);
 
+	UFUNCTION(BlueprintCallable, Category = "Respawn", meta = (WorldContext = "WorldContextObject"))
+	bool BeginReloadRespawnAtActiveRestPoint(const UObject* WorldContextObject);
+
+	UFUNCTION(BlueprintPure, Category = "Respawn")
+	bool HasPendingRespawnAfterLevelLoad() const { return bPendingRespawnAfterLevelLoad; }
+
+	UFUNCTION(BlueprintCallable, Category = "Respawn")
+	void ConsumePendingRespawnAfterLevelLoad();
+
 private:
 	UPROPERTY()
 	FRespawnPointData ActiveRestPoint;
+
+	UPROPERTY()
+	bool bPendingRespawnAfterLevelLoad = false;
 };

@@ -136,63 +136,23 @@ void ADuelEncounterManager::RestartEncounter()
 
 bool ADuelEncounterManager::RequestRespawnFromDefeat()
 {
-	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] RequestRespawnFromDefeat called. CurrentEndResult=%d Active=%d EndFlowStarted=%d"),
-		static_cast<int32>(CurrentEndResult),
-		bEncounterActive,
-		bEndFlowStarted
-	);
-
 	if (CurrentEndResult != EDuelEndResult::Defeat)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] Failed: CurrentEndResult is not Defeat"));
-		OnRespawnFromDefeatFailed();
-		return false;
-	}
-
-	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] PlayerController=%s Pawn=%s"),
-		*GetNameSafe(PC),
-		PC ? *GetNameSafe(PC->GetPawn()) : TEXT("None")
-	);
-
-	if (!PC)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] Failed: PlayerController is null"));
 		OnRespawnFromDefeatFailed();
 		return false;
 	}
 
 	UGameInstance* GameInstance = GetGameInstance();
-	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] GameInstance=%s"), *GetNameSafe(GameInstance));
 
 	if (!GameInstance)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] Failed: GameInstance is null"));
 		OnRespawnFromDefeatFailed();
 		return false;
 	}
 
-	UMBDRespawnSubsystem* RespawnSubsystem =
-		GameInstance->GetSubsystem<UMBDRespawnSubsystem>();
-
-	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] RespawnSubsystem=%s HasRestPoint=%d"),
-		*GetNameSafe(RespawnSubsystem),
-		RespawnSubsystem ? RespawnSubsystem->HasActiveRestPoint() : false
-	);
+	UMBDRespawnSubsystem* RespawnSubsystem = GameInstance->GetSubsystem<UMBDRespawnSubsystem>();
 
 	if (!RespawnSubsystem)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] Failed: RespawnSubsystem is null"));
-		OnRespawnFromDefeatFailed();
-		return false;
-	}
-
-	const bool bRespawned =
-		RespawnSubsystem->RespawnPlayerAtActiveRestPoint(PC);
-
-	UE_LOG(LogTemp, Warning, TEXT("[RespawnManager] RespawnSubsystem returned %d"), bRespawned);
-
-	if (!bRespawned)
 	{
 		OnRespawnFromDefeatFailed();
 		return false;
@@ -206,17 +166,13 @@ bool ADuelEncounterManager::RequestRespawnFromDefeat()
 
 	ClearBossEncounterHUD();
 
-	CurrentEndResult = EDuelEndResult::None;
-	bEndFlowStarted = false;
-	bEncounterActive = false;
+	const bool bRespawned = RespawnSubsystem->BeginReloadRespawnAtActiveRestPoint(this);
 
-	SetPlayerInputLocked(false, false);
-
-	FInputModeGameOnly InputMode;
-	PC->SetInputMode(InputMode);
-	PC->bShowMouseCursor = false;
-
-	OnRespawnFromDefeatSucceeded();
+	if (!bRespawned)
+	{
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
 
 	return true;
 }

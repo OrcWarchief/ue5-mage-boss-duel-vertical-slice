@@ -211,7 +211,6 @@ void ABaseCharacter::ApplyDamage(const FHitPayload& HitPayload, ABaseCharacter* 
 {
 	if (!IsAlive())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[DAMAGE-FAIL] Target already dead"));
 		return;
 	}
 
@@ -671,6 +670,10 @@ void ABaseCharacter::FireBasicAttackProjectile(AActor* TargetActor)
 // ===== LifeCycle / Hit =====
 void ABaseCharacter::OnDeathFinished()
 {
+	if (IsPlayerControlled())
+	{
+		return;
+	}
 	// 데스 몽타주 종료시점에서 호출하는 용도 2초 후 destroy
 	SetLifeSpan(2.0f);
 }
@@ -1270,10 +1273,6 @@ void ABaseCharacter::BeginDodge(UAnimMontage* MontageToPlay, EDodgeDirection Dir
 	
 	if (!AnimInst || !MoveComp || !MontageToPlay) { return; }
 
-	UE_LOG(LogTemp, Warning, TEXT("BeginDodge | Montage=%s | Direction=%d"),
-		*GetNameSafe(MontageToPlay),
-		static_cast<int32>(Direction));
-
 	CurrentDodgeDirection = Direction;
 	OnDodgeStarted_StateHook();
 
@@ -1308,11 +1307,6 @@ void ABaseCharacter::EndDodge()
 {
 	UAnimInstance* AnimInst = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
 
-	UE_LOG(LogTemp, Warning, TEXT("EndDodge called | State=%d | Dir=%d | ActiveMontage=%s"),
-		static_cast<int32>(CurrentState),
-		static_cast<int32>(CurrentDodgeDirection),
-		*GetNameSafe(AnimInst ? AnimInst->GetCurrentActiveMontage() : nullptr));
-
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		MoveComp->bOrientRotationToMovement = bSavedOrientRotationToMovement;
@@ -1330,9 +1324,6 @@ void ABaseCharacter::EndDodge()
 
 void ABaseCharacter::OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	UE_LOG(LogTemp, Warning, TEXT("OnDodgeMontageEnded | Montage=%s | Interrupted=%d"),
-		*GetNameSafe(Montage),
-		bInterrupted ? 1 : 0);
 	EndDodge();
 }
 
