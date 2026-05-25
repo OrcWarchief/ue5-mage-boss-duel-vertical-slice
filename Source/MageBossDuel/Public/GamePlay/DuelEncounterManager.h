@@ -10,6 +10,7 @@ class ABaseCharacter;
 class AMageBossCharacter;
 class UUserWidget;
 class UBossEncounterHUDWidget;
+class UDuelEndScreenWidget;
 
 UENUM(BlueprintType)
 enum class EDuelEndResult : uint8
@@ -35,6 +36,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Duel")
 	void RestartEncounter();
+
+	UFUNCTION(BlueprintCallable, Category = "Duel|Respawn")
+	bool RequestRespawnFromDefeat();
 
 	UFUNCTION(BlueprintCallable, Category = "Duel")
 	void SetPlayerInputLocked(bool bLocked, bool bLockLook);
@@ -91,7 +95,7 @@ protected:
 	TSubclassOf<UUserWidget> VictoryWidgetClass;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|UI")
-	TSubclassOf<UUserWidget> DefeatWidgetClass;
+	TSubclassOf<UDuelEndScreenWidget> DefeatWidgetClass;
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|UI")
 	TSubclassOf<UBossEncounterHUDWidget> BossEncounterHUDWidgetClass;
@@ -140,6 +144,12 @@ protected:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Duel")
 	void OnEndScreenReady(EDuelEndResult Result);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Duel|Respawn")
+	void OnRespawnFromDefeatSucceeded();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Duel|Respawn")
+	void OnRespawnFromDefeatFailed();
 
 private:
 	FTimerHandle EndScreenTimerHandle;

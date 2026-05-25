@@ -196,6 +196,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "Combat|Death")
     bool IsDeathSequenceFinished() const { return bDeathSequenceFinished; }
 
+    UFUNCTION(BlueprintCallable, Category = "LifeCycle|Respawn")
+    void ReviveForRespawn();
+
 protected:
     virtual void BeginPlay() override;
 
@@ -207,6 +210,9 @@ protected:
     /** 사망 처리 훅(Dead 전환, 이동/충돌/입력/AI 비활성화 등). */
     UFUNCTION(BlueprintNativeEvent, Category = "LifeCycle")
     void Die();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "LifeCycle|Respawn")
+    void OnRevivedForRespawn();
 
     /** 피격 리액션 훅(상태=Hit, 몽타주/경직 등). */
     UFUNCTION(BlueprintNativeEvent, Category = "Combat|Hit")

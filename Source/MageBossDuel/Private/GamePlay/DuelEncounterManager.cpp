@@ -6,11 +6,14 @@
 #include "Blueprint/UserWidget.h"
 #include "Characters/Boss/MageBossCharacter.h"
 #include "Characters/Core/BaseCharacter.h"
+#include "Combat/MBDRespawnSubsystem.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "UI/HUD/BossEncounterHUDWidget.h"
+#include "UI/HUD/DuelEndScreenWidget.h"
 
 ADuelEncounterManager::ADuelEncounterManager()
 {
@@ -131,6 +134,49 @@ void ADuelEncounterManager::RestartEncounter()
 	UGameplayStatics::OpenLevel(this, LevelToLoad);
 }
 
+bool ADuelEncounterManager::RequestRespawnFromDefeat()
+{
+	if (CurrentEndResult != EDuelEndResult::Defeat)
+	{
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
+
+	UGameInstance* GameInstance = GetGameInstance();
+
+	if (!GameInstance)
+	{
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
+
+	UMBDRespawnSubsystem* RespawnSubsystem = GameInstance->GetSubsystem<UMBDRespawnSubsystem>();
+
+	if (!RespawnSubsystem)
+	{
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
+
+	if (ActiveEndWidget)
+	{
+		ActiveEndWidget->RemoveFromParent();
+		ActiveEndWidget = nullptr;
+	}
+
+	ClearBossEncounterHUD();
+
+	const bool bRespawned = RespawnSubsystem->BeginReloadRespawnAtActiveRestPoint(this);
+
+	if (!bRespawned)
+	{
+		OnRespawnFromDefeatFailed();
+		return false;
+	}
+
+	return true;
+}
+
 void ADuelEncounterManager::SetPlayerInputLocked(bool bLocked, bool bLockLook)
 {
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
@@ -201,32 +247,51 @@ void ADuelEncounterManager::ShowEndScreen()
 		ActiveEndWidget = nullptr;
 	}
 
-	TSubclassOf<UUserWidget> WidgetClass = nullptr;
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC)
+	{
+		OnEndScreenReady(CurrentEndResult);
+		return;
+	}
 
 	switch (CurrentEndResult)
 	{
 	case EDuelEndResult::Victory:
-		WidgetClass = VictoryWidgetClass;
+		if (VictoryWidgetClass)
+		{
+			ActiveEndWidget = CreateWidget<UUserWidget>(PC, VictoryWidgetClass);
+		}
 		break;
 
 	case EDuelEndResult::Defeat:
-		WidgetClass = DefeatWidgetClass;
+		if (DefeatWidgetClass)
+		{
+			UDuelEndScreenWidget* DefeatWidget = CreateWidget<UDuelEndScreenWidget>(PC, DefeatWidgetClass);
+
+			if (DefeatWidget)
+			{
+				DefeatWidget->InitializeFromEncounterManager(this, CurrentEndResult);
+				ActiveEndWidget = DefeatWidget;
+			}
+		}
 		break;
 
 	default:
 		break;
 	}
 
-	if (WidgetClass)
+	if (ActiveEndWidget)
 	{
-		APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-		if (PC)
+		ActiveEndWidget->AddToViewport(EndWidgetZOrder);
+
+		if (CurrentEndResult == EDuelEndResult::Defeat)
 		{
-			ActiveEndWidget = CreateWidget<UUserWidget>(PC, WidgetClass);
-			if (ActiveEndWidget)
-			{
-				ActiveEndWidget->AddToViewport(EndWidgetZOrder);
-			}
+			FInputModeUIOnly InputMode;
+			//InputMode.SetWidgetToFocus(ActiveEndWidget->TakeWidget()); 이후에 패드 입력 고려
+			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+
+			PC->SetInputMode(InputMode);
+			PC->bShowMouseCursor = true;
 		}
 	}
 
