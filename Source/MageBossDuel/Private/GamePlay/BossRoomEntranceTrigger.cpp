@@ -10,6 +10,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "GamePlay/DuelEncounterManager.h"
+#include "GamePlay/BossRoomBoundaryBlocker.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "UI/HUD/DuelScreenFadeWidget.h"
@@ -28,6 +29,17 @@ ABossRoomEntranceTrigger::ABossRoomEntranceTrigger()
 	TriggerVolume->SetCollisionObjectType(ECC_WorldDynamic);
 	TriggerVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
 	TriggerVolume->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+}
+
+void ABossRoomEntranceTrigger::SetBossRoomBoundariesBlocked(bool bBlocked)
+{
+	for (ABossRoomBoundaryBlocker* Blocker : BoundaryBlockers)
+	{
+		if (IsValid(Blocker))
+		{
+			Blocker->SetBlocked(bBlocked);
+		}
+	}
 }
 
 void ABossRoomEntranceTrigger::BeginPlay()
@@ -86,13 +98,11 @@ void ABossRoomEntranceTrigger::BeginBossRoomEntry(APawn* PlayerPawn)
 
 	if (!IsValid(EncounterManager))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BossRoomEntranceTrigger: EncounterManager reference is not set."));
 		return;
 	}
 
 	if (!IsValid(ArenaEntryPoint))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BossRoomEntranceTrigger: ArenaEntryPoint reference is not set."));
 		return;
 	}
 
@@ -159,6 +169,28 @@ void ABossRoomEntranceTrigger::TeleportPlayerToArenaEntry()
 		false,
 		true
 	);
+
+	PlayerController->SetControlRotation(EntryRotation);
+
+	if (UPawnMovementComponent* MovementComponent = PlayerPawn->GetMovementComponent())
+	{
+		MovementComponent->StopMovementImmediately();
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || BlackHoldDuration <= 0.0f)
+	{
+		BeginFadeOut();
+		return;
+	}
+
+	World->GetTimerManager().SetTimer(
+		FadeOutTimerHandle,
+		this,
+		&ABossRoomEntranceTrigger::BeginFadeOut,
+		BlackHoldDuration,
+		false
+	);
 }
 
 void ABossRoomEntranceTrigger::BeginFadeOut()
@@ -192,6 +224,11 @@ void ABossRoomEntranceTrigger::FinishBossRoomEntry()
 	{
 		ActiveFadeWidget->RemoveFromParent();
 		ActiveFadeWidget = nullptr;
+	}
+
+	if (bBlockBoundariesOnEntry)
+	{
+		SetBossRoomBoundariesBlocked(true);
 	}
 
 	if (IsValid(EncounterManager))

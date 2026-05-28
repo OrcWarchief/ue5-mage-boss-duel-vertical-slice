@@ -7,6 +7,7 @@
 #include "BossRoomEntranceTrigger.generated.h"
 
 class APlayerController;
+class ABossRoomBoundaryBlocker;
 class ADuelEncounterManager;
 class APawn;
 class UBoxComponent;
@@ -21,9 +22,11 @@ class MAGEBOSSDUEL_API ABossRoomEntranceTrigger : public AActor
 public:
 	ABossRoomEntranceTrigger();
 
+	UFUNCTION(BlueprintCallable, Category = "Boss Room|Boundary")
+	void SetBossRoomBoundariesBlocked(bool bBlocked);
+
 protected:
 	virtual void BeginPlay() override;
-
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USceneComponent> SceneRoot;
 
@@ -35,6 +38,12 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss Room")
 	TObjectPtr<AActor> ArenaEntryPoint;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Boss Room|Boundary")
+	TArray<TObjectPtr<ABossRoomBoundaryBlocker>> BoundaryBlockers;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Boss Room|Boundary")
+	bool bBlockBoundariesOnEntry = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss Room|Transition")
 	TSubclassOf<UDuelScreenFadeWidget> ScreenFadeWidgetClass;
