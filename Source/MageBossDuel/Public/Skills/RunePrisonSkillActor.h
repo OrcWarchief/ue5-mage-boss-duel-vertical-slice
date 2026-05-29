@@ -91,9 +91,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Trace", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float GroundTraceDown = 800.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Debug")
-	bool bDrawDebug = false;
-
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Skill|RunePrison|Runtime")
 	bool bPrisonActive = false;
 

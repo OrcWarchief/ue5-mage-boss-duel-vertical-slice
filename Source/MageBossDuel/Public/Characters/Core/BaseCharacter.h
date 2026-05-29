@@ -447,9 +447,6 @@ protected:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Hit")
     EHitReactionType CurrentHitReactionType = EHitReactionType::None;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Debug")
-    bool bEnableCombatDebug = false;
-
     /** 기본 공격 쿨다운 (s). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Basic", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
     float AttackCooldown = 0.5f;

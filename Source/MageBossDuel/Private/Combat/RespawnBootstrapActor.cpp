@@ -83,7 +83,6 @@ void ARespawnBootstrapActor::TryApplyPendingRespawn()
 
 	if (ApplyAttempts < MaxApplyAttempts)
 	{
-		++ApplyAttempts;
 		if (ApplyAttempts < MaxApplyAttempts)
 		{
 			if (UWorld* World = GetWorld())
