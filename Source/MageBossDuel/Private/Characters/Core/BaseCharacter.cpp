@@ -351,10 +351,6 @@ bool ABaseCharacter::CanBasicAttack() const
 
 void ABaseCharacter::StartBasicAttack()
 {
-	if (bEnableCombatDebug)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("StartBasicAttack"));
-	}
 	if (!CanBasicAttack())
 	{
 		return;
@@ -423,11 +419,6 @@ void ABaseCharacter::PerformBasicAttackHitCheck_Implementation()
 
 void ABaseCharacter::EndBasicAttack()
 {
-	if (bEnableCombatDebug)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("End Basic Attack"));
-	}
-
 	if (!bIsAttacking)
 	{
 		return;
@@ -493,11 +484,6 @@ AActor* ABaseCharacter::FindLockOnTarget(
 		FCollisionShape::MakeSphere(MaxDistance),
 		QueryParams
 	);
-
-	if (bEnableCombatDebug)
-	{
-		DrawDebugSphere(World, SearchCenter, MaxDistance, 24, FColor::Cyan, false, 1.0f, 0, 1.0f);
-	}
 
 	if (!bAny) { return nullptr; }
 
