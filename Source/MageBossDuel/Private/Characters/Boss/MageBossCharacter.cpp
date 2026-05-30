@@ -599,11 +599,6 @@ void AMageBossCharacter::StartBossBrain()
 		Interval,
 		true
 	);
-
-	if (bEnableBossBrainDebug)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[BossBrain] Started"));
-	}
 }
 
 void AMageBossCharacter::StopBossBrain()
@@ -611,11 +606,6 @@ void AMageBossCharacter::StopBossBrain()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(BossBrainTimerHandle);
-	}
-
-	if (bEnableBossBrainDebug)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[BossBrain] Stopped"));
 	}
 }
 
@@ -2093,16 +2083,6 @@ bool AMageBossCharacter::TryStartBossSkill(EBossSkillType SkillType)
 		if (UWorld* World = GetWorld())
 		{
 			LastBossSkillStartTime = World->GetTimeSeconds();
-		}
-
-		if (bEnableBossBrainDebug)
-		{
-			UE_LOG(
-				LogTemp,
-				Warning,
-				TEXT("[BossBrain] Started skill: %s"),
-				*UEnum::GetValueAsString(SkillType)
-			);
 		}
 	}
 

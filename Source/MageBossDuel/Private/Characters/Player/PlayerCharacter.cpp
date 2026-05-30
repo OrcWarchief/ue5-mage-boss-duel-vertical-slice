@@ -232,10 +232,6 @@ void APlayerCharacter::ToggleLockOn(const FInputActionValue& Value)
 	{
 		StartLockOn(Target);
 	}
-	else if (bEnableLockOnDebug && GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, TEXT("LockOn: No Target"));
-	}
 }
 
 void APlayerCharacter::Jump()
@@ -321,12 +317,6 @@ void APlayerCharacter::StartLockOn(AActor* NewTarget)
 	// Lock On : character follow Controller Yaw;
 	bUseControllerRotationYaw = true;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
-
-	if (GEngine)
-	{
-		const FString Msg = FString::Printf(TEXT("StartLockOn() : Lock On (On) : %s"), *NewTarget->GetName());
-		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Green, Msg);
-	}
 }
 
 void APlayerCharacter::StopLockOn()
@@ -336,11 +326,6 @@ void APlayerCharacter::StopLockOn()
 
 	bUseControllerRotationYaw = false;
 	GetCharacterMovement()->bOrientRotationToMovement = true;
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Silver, TEXT("StopLockOn() : Lock On (Off)"));
-	}
 }
 
 void APlayerCharacter::UpdateLockOn(float DeltaTime)
@@ -386,11 +371,6 @@ void APlayerCharacter::UpdateLockOn(float DeltaTime)
 	const FRotator CurrentControlRot = Controller->GetControlRotation();
 	const FRotator NextControlRot = FMath::RInterpTo(CurrentControlRot, DesiredRot, DeltaTime, LockOnInterpSpeed);
 	Controller->SetControlRotation(NextControlRot);
-
-	if (bEnableLockOnDebug && GEngine)
-	{
-		DrawDebugLine(GetWorld(), ViewLoc, AimLoc, FColor::Green, false, 0.f, 0, 0.2f);
-	}
 }
 
 void APlayerCharacter::OnTargetSwitchX(const FInputActionValue& Value)
