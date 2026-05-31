@@ -996,14 +996,19 @@ void ABaseCharacter::BroadcastManaChanged()
 
 EHitReactionType ABaseCharacter::ResolveHitReaction(const FHitPayload& HitPayload, bool bPoiseBroken) const
 {
+	if (bPoiseBroken)
+	{
+		const EHitReactionType BreakReaction =
+			PoiseBreakReactionType == EHitReactionType::None
+			? EHitReactionType::HeavyStagger
+			: PoiseBreakReactionType;
+
+		return MaxHitReaction(HitPayload.ReactionType, BreakReaction);
+	}
+
 	if (HitPayload.bForceReaction)
 	{
 		return HitPayload.ReactionType;
-	}
-
-	if (bPoiseBroken)
-	{
-		return MaxHitReaction(HitPayload.ReactionType, EHitReactionType::HeavyStagger);
 	}
 
 	if (HitPayload.bCanInterrupt && CanBeInterrupted())

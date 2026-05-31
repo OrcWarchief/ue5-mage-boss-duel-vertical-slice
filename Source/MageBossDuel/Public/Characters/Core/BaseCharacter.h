@@ -424,6 +424,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
     float KnockdownRecoveryDuration = 1.15f;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit|Poise")
+    EHitReactionType PoiseBreakReactionType = EHitReactionType::HeavyStagger;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Hit|Anim")
     TObjectPtr<UAnimMontage> LightHitReactionMontage = nullptr;
 
