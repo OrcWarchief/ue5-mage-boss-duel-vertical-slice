@@ -66,6 +66,11 @@ void ABaseMagicProjectile::BeginPlay()
 
 void ABaseMagicProjectile::OnProjectileBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
+	if (bHasImpacted)
+	{
+		return;
+	}
+
 	if (!IsValid(OtherActor) || !IsValid(OtherComp))
 	{
 		return;
@@ -93,17 +98,38 @@ void ABaseMagicProjectile::OnProjectileBeginOverlap(UPrimitiveComponent* Overlap
 		return;
 	}
 
+	bHasImpacted = true;
+
+	const FVector ImpactLocation = SweepResult.bBlockingHit
+		? FVector(SweepResult.ImpactPoint)
+		: GetActorLocation();
+
 	HitCharacter->ApplyHitPayload(HitPayload, AttackCharacter);
+
+	OnProjectileImpacted(ImpactLocation, OtherActor, true);
 
 	Destroy();
 }
 
 void ABaseMagicProjectile::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
+	if (bHasImpacted)
+	{
+		return;
+	}
+
 	if (!IsValid(OtherActor) || OtherActor == this || OtherActor == GetOwner() || OtherActor == GetInstigator())
 	{
 		return;
 	}
+
+	bHasImpacted = true;
+
+	const FVector ImpactLocation = Hit.bBlockingHit
+		? FVector(Hit.ImpactPoint)
+		: GetActorLocation();
+
+	OnProjectileImpacted(ImpactLocation, OtherActor, false);
 
 	Destroy();
 }

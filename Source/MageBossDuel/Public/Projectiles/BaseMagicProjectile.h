@@ -53,6 +53,11 @@ protected:
 		const FHitResult& Hit
 	);
 
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Projectile")
+	void OnProjectileImpacted(const FVector& ImpactLocation, AActor* HitActor, bool bHitCharacter);
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Projectile|Runtime")
+	bool bHasImpacted = false;
 
 public:	
 	UFUNCTION(BlueprintCallable, Category = "Combat")
