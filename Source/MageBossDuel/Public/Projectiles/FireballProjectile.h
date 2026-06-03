@@ -75,6 +75,23 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Skill|Fireball")
 	void OnFireballExploded(const FVector& ExplosionOrigin, AActor* DirectHitActor);
 
+	// ===== Secondary Explosion =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball|Secondary Explosion")
+	bool bUseSecondaryExplosion = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Fireball|Secondary Explosion", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float SecondaryExplosionDelay = 1.0f;
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Skill|Fireball")
+	void OnSecondaryExplosion(const FVector& ExplosionOrigin);
+
 private:
 	void ApplyExplosionDamage(AActor* DirectHitActor, const FVector& ExplosionOrigin);
+
+	FTimerHandle SecondaryExplosionTimerHandle;
+
+	FVector CachedExplosionOrigin = FVector::ZeroVector;
+
+	void TriggerSecondaryExplosion();
 };

@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "TimerManager.h"
 
 namespace CombatTargetFilter = MageBossDuel::CombatTargetFilter;
 
@@ -152,6 +153,25 @@ void AFireballProjectile::Explode(AActor* DirectHitActor)
 
 	OnFireballExploded(ExplosionOrigin, DirectHitActor);
 
+	if (bUseSecondaryExplosion && SecondaryExplosionDelay > 0.0f)
+	{
+		CachedExplosionOrigin = ExplosionOrigin;
+
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(
+				SecondaryExplosionTimerHandle,
+				this,
+				&AFireballProjectile::TriggerSecondaryExplosion,
+				SecondaryExplosionDelay,
+				false
+			);
+
+			SetLifeSpan(SecondaryExplosionDelay + 2.0f);
+			return;
+		}
+	}
+
 	Destroy();
 }
 
@@ -231,4 +251,11 @@ void AFireballProjectile::ApplyExplosionDamage(AActor* DirectHitActor, const FVe
 		HitCharacter->ApplyHitPayload(SplashHitPayload, DamageCauser);
 		DamagedActors.Add(HitCharacter);
 	}
+}
+
+void AFireballProjectile::TriggerSecondaryExplosion()
+{
+	OnSecondaryExplosion(CachedExplosionOrigin);
+
+	Destroy();
 }
