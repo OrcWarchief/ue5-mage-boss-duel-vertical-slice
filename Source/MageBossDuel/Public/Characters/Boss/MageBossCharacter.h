@@ -124,6 +124,25 @@ class MAGEBOSSDUEL_API AMageBossCharacter : public ABaseCharacter
 public:
 	AMageBossCharacter();
 
+	virtual void Tick(float DeltaTime) override;
+
+	// ===== Boss Orbit Movement Tuning =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement")
+	bool bEnableBossOrbitMovement = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float OrbitInputScale = 0.35f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "deg/s"))
+	float BossFacingInterpSpeed = 8.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement", meta = (ClampMin = "0.1", UIMin = "0.1", Units = "s"))
+	float OrbitDirectionChangeInterval = 2.5f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement")
+	bool bEnableRepositionTeleport = true;
+
 	// ===== Target =====
 
 	UFUNCTION(BlueprintCallable, Category = "Boss|Target")
@@ -448,6 +467,12 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Runtime")
 	float LastBossSkillStartTime = -9999.0f;
 
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Movement|Runtime")
+	int32 OrbitDirectionSign = 1;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Movement|Runtime")
+	float LastOrbitDirectionChangeTime = -9999.0f;
+
 	// ===== Boss Phase Tuning =====
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Phase")
@@ -602,6 +627,22 @@ private:
 	int32 PickWeightedBossSkillIndex(const TArray<FBossSkillOption>& Candidates) const;
 
 	void InitializeDefaultBossSkillOptions();
+
+	// ===== Boss Orbit Movement =====
+
+	void UpdateBossOrbitMovement(float DeltaTime);
+
+	bool CanUpdateBossOrbitMovement(float& OutDistanceToTarget) const;
+
+	bool TryStartRepositionTeleport();
+
+	bool ShouldRepositionWithTeleport(float DistanceToTarget) const;
+
+	FVector GetFlatDirectionToCombatTarget(float& OutDistance) const;
+
+	void FaceCombatTargetSmoothly(float DeltaTime);
+
+	void UpdateOrbitDirectionIfNeeded();
 
 	// ===== Boss Phase	=====
 	UPROPERTY(Transient)

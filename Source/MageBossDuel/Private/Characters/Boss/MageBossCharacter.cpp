@@ -14,7 +14,8 @@
 
 AMageBossCharacter::AMageBossCharacter()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	if (USkeletalMeshComponent* MeshComp = GetMesh())
 	{
@@ -599,6 +600,8 @@ void AMageBossCharacter::StartBossBrain()
 		Interval,
 		true
 	);
+
+	SetActorTickEnabled(true);
 }
 
 void AMageBossCharacter::StopBossBrain()
@@ -607,6 +610,8 @@ void AMageBossCharacter::StopBossBrain()
 	{
 		World->GetTimerManager().ClearTimer(BossBrainTimerHandle);
 	}
+
+	SetActorTickEnabled(false);
 }
 
 bool AMageBossCharacter::TrySelectAndStartBossSkill()
@@ -766,6 +771,13 @@ void AMageBossCharacter::BeginPlay()
 	{
 		StartBossBrain();
 	}
+}
+
+void AMageBossCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	UpdateBossOrbitMovement(DeltaTime);
 }
 
 bool AMageBossCharacter::IsLockOnActive() const
@@ -1895,6 +1907,11 @@ void AMageBossCharacter::BossBrainThink()
 		return;
 	}
 
+	if (TryStartRepositionTeleport())
+	{
+		return;
+	}
+
 	UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -2193,6 +2210,197 @@ void AMageBossCharacter::InitializeDefaultBossSkillOptions()
 		Option.bAllowRepeat = false;
 		BossSkillOptions.Add(Option);
 	}
+}
+
+void AMageBossCharacter::UpdateBossOrbitMovement(float DeltaTime)
+{
+	float DistanceToTarget = 0.0f;
+	if (!CanUpdateBossOrbitMovement(DistanceToTarget))
+	{
+		return;
+	}
+
+	FaceCombatTargetSmoothly(DeltaTime);
+	UpdateOrbitDirectionIfNeeded();
+
+	float UnusedDistance = 0.0f;
+	const FVector DirectionToTarget = GetFlatDirectionToCombatTarget(UnusedDistance);
+	if (DirectionToTarget.IsNearlyZero())
+	{
+		return;
+	}
+
+	FVector OrbitDirection = FVector::CrossProduct(DirectionToTarget, FVector::UpVector).GetSafeNormal();
+	OrbitDirection.Z = 0.0f;
+
+	if (!OrbitDirection.Normalize())
+	{
+		return;
+	}
+
+	OrbitDirection *= static_cast<float>(OrbitDirectionSign);
+
+	AddMovementInput(OrbitDirection, OrbitInputScale);
+
+	if (GetCurrentState() == ECharacterState::Idle)
+	{
+		SetCharacterState(ECharacterState::Moving);
+	}
+}
+
+bool AMageBossCharacter::CanUpdateBossOrbitMovement(float& OutDistanceToTarget) const
+{
+	OutDistanceToTarget = 0.0f;
+	if (!bEnableBossOrbitMovement)
+	{
+		return false;
+	}
+	if (!IsAlive())
+	{
+		return false;
+	}
+	if (!IsBossBrainRunning())
+	{
+		return false;
+	}
+
+	if (!IsValid(CurrentCombatTarget.Get()))
+	{
+	return false;
+	}
+
+	if (IsPhaseTransitioning())
+	{
+		return false;
+	}
+
+	if (IsTeleporting())
+	{
+		return false;
+	}
+
+	if (IsAnyBossSkillActive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	const UCharacterMovementComponent * MoveComp = GetCharacterMovement();
+	if (!MoveComp || !MoveComp->IsMovingOnGround())
+	{
+		return false;
+	}
+
+	const FVector DirectionToTarget = GetFlatDirectionToCombatTarget(OutDistanceToTarget);
+	if (DirectionToTarget.IsNearlyZero())
+	{
+		return false;
+	}
+
+	return OutDistanceToTarget >= TeleportNearDistance && 
+		OutDistanceToTarget <= TeleportFarDistance;
+}
+
+bool AMageBossCharacter::TryStartRepositionTeleport()
+{
+	if (!bEnableRepositionTeleport)
+	{
+		return false;
+	}
+
+	if (bBlockOtherSkillsDuringRunePrisonPattern && IsRunePrisonPatternActive())
+	{
+		return false;
+	}
+
+	float DistanceToTarget = 0.0f;
+	const FVector DirectionToTarget = GetFlatDirectionToCombatTarget(DistanceToTarget);
+	if (DirectionToTarget.IsNearlyZero())
+	{
+		return false;
+	}
+
+	return TryStartBossSkill(EBossSkillType::Teleport);
+}
+
+bool AMageBossCharacter::ShouldRepositionWithTeleport(float DistanceToTarget) const
+{
+	if (!bEnableRepositionTeleport)
+	{
+		return false;
+	}
+
+	const float NearDistance = FMath::Max(0.0f, TeleportNearDistance);
+	const float FarDistance  = FMath::Max(NearDistance, TeleportFarDistance);
+
+	return DistanceToTarget <= NearDistance || DistanceToTarget >= FarDistance;
+}
+
+FVector AMageBossCharacter::GetFlatDirectionToCombatTarget(float& OutDistance) const
+{
+	OutDistance = 0.0f;
+
+	const AActor* Target = CurrentCombatTarget.Get();
+	if (!IsValid(Target))
+	{
+		return FVector::ZeroVector;
+	}
+
+	FVector ToTarget = Target->GetActorLocation() - GetActorLocation();
+	ToTarget.Z = 0.0f;
+
+	OutDistance = ToTarget.Size();
+	if (OutDistance <= KINDA_SMALL_NUMBER)
+	{
+		return FVector::ZeroVector;
+	}
+
+	return ToTarget / OutDistance;
+}
+
+void AMageBossCharacter::FaceCombatTargetSmoothly(float DeltaTime)
+{
+	float DistanceToTarget = 0.0f;
+	const FVector DirectionToTarget = GetFlatDirectionToCombatTarget(DistanceToTarget);
+	if (DirectionToTarget.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FRotator DesiredRotation = DirectionToTarget.Rotation();
+	const FRotator CurrentRotation = GetActorRotation();
+
+	const FRotator NewRotation = FMath::RInterpTo(
+		CurrentRotation,
+		FRotator(0.0f, DesiredRotation.Yaw, 0.0f),
+		DeltaTime,
+		BossFacingInterpSpeed
+	);
+
+	SetActorRotation(NewRotation);
+}
+
+void AMageBossCharacter::UpdateOrbitDirectionIfNeeded()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+	if ((Now - LastOrbitDirectionChangeTime) < OrbitDirectionChangeInterval)
+	{
+		return;
+	}
+
+	LastOrbitDirectionChangeTime = Now;
+	OrbitDirectionSign = FMath::RandBool() ? 1 : -1;
 }
 
 EBossPhase AMageBossCharacter::GetDesiredBossPhaseFromHealth() const
