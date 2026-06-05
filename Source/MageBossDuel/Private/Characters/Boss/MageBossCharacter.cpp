@@ -2325,6 +2325,11 @@ bool AMageBossCharacter::TryStartRepositionTeleport()
 		return false;
 	}
 
+	if (!ShouldRepositionWithTeleport(DistanceToTarget))
+	{
+		return false;
+	}
+
 	return TryStartBossSkill(EBossSkillType::Teleport);
 }
 
