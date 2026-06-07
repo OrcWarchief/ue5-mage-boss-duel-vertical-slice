@@ -12,10 +12,25 @@
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
+#include "DrawDebugHelpers.h"
+
 AMageBossCharacter::AMageBossCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+
+	// deb
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = false;
+	bUseControllerRotationRoll = false;
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->bOrientRotationToMovement = false;
+		MoveComp->bUseControllerDesiredRotation = false;
+	}
+
+	// debug
 
 	if (USkeletalMeshComponent* MeshComp = GetMesh())
 	{
@@ -776,6 +791,39 @@ void AMageBossCharacter::BeginPlay()
 void AMageBossCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	const ECharacterState State = GetCurrentState();
+
+	const bool bCanFaceTarget =
+		IsAlive() &&
+		IsValid(CurrentCombatTarget.Get()) &&
+		!IsTeleporting() &&
+		!IsPhaseTransitioning() &&
+		(
+			bLocomotionOnlyDebug ||
+			!IsAnyBossSkillActive()
+			) &&
+		(
+			State == ECharacterState::Idle ||
+			State == ECharacterState::Moving
+			);
+
+	if (bCanFaceTarget)
+	{
+		FaceCombatTargetSmoothly(DeltaTime);
+	}
+
+	if (bDrawComfortDistanceDebug)
+	{
+		float DistanceToTarget = 0.0f;
+		const FVector DirectionToTarget =
+			GetFlatDirectionToCombatTarget(DistanceToTarget);
+
+		if (!DirectionToTarget.IsNearlyZero())
+		{
+			DrawComfortDistanceDebug(DistanceToTarget);
+		}
+	}
 
 	UpdateBossOrbitMovement(DeltaTime);
 }
@@ -1897,6 +1945,12 @@ void AMageBossCharacter::BossBrainThink()
 		return;
 	}
 
+	// debug
+	if (bLocomotionOnlyDebug)
+	{
+		return;
+	}
+
 	if (IsAnyBossSkillActive())
 	{
 		return;
@@ -2220,17 +2274,20 @@ void AMageBossCharacter::UpdateBossOrbitMovement(float DeltaTime)
 		return;
 	}
 
-	FaceCombatTargetSmoothly(DeltaTime);
 	UpdateOrbitDirectionIfNeeded();
 
 	float UnusedDistance = 0.0f;
-	const FVector DirectionToTarget = GetFlatDirectionToCombatTarget(UnusedDistance);
+	const FVector DirectionToTarget =
+		GetFlatDirectionToCombatTarget(UnusedDistance);
+
 	if (DirectionToTarget.IsNearlyZero())
 	{
 		return;
 	}
 
-	FVector OrbitDirection = FVector::CrossProduct(DirectionToTarget, FVector::UpVector).GetSafeNormal();
+	FVector OrbitDirection =
+		FVector::CrossProduct(DirectionToTarget, FVector::UpVector).GetSafeNormal();
+
 	OrbitDirection.Z = 0.0f;
 
 	if (!OrbitDirection.Normalize())
@@ -2251,14 +2308,17 @@ void AMageBossCharacter::UpdateBossOrbitMovement(float DeltaTime)
 bool AMageBossCharacter::CanUpdateBossOrbitMovement(float& OutDistanceToTarget) const
 {
 	OutDistanceToTarget = 0.0f;
+
 	if (!bEnableBossOrbitMovement)
 	{
 		return false;
 	}
+
 	if (!IsAlive())
 	{
 		return false;
 	}
+
 	if (!IsBossBrainRunning())
 	{
 		return false;
@@ -2300,6 +2360,11 @@ bool AMageBossCharacter::CanUpdateBossOrbitMovement(float& OutDistanceToTarget) 
 	if (DirectionToTarget.IsNearlyZero())
 	{
 		return false;
+	}
+
+	if (bLocomotionOnlyDebug)
+	{
+		return true;
 	}
 
 	return OutDistanceToTarget >= TeleportNearDistance && 
@@ -2564,4 +2629,122 @@ void AMageBossCharacter::ApplyBossPhaseTuning(EBossPhase NewPhase)
 	default:
 		break;
 	}
+}
+
+void AMageBossCharacter::DrawComfortDistanceDebug(float DistanceToTarget) const
+{
+	if (!bDrawComfortDistanceDebug)
+	{
+		return;
+	}
+
+	const AActor* Target = CurrentCombatTarget.Get();
+	const UWorld* World = GetWorld();
+
+	if (!World || !IsValid(Target))
+	{
+		return;
+	}
+
+	const float DebugZ = GetActorLocation().Z + ComfortDistanceDebugHeight;
+
+	const FVector TargetCenter = FVector(
+		Target->GetActorLocation().X,
+		Target->GetActorLocation().Y,
+		DebugZ
+	);
+
+	const FVector BossPoint = FVector(
+		GetActorLocation().X,
+		GetActorLocation().Y,
+		DebugZ
+	);
+
+	const int32 Segments = FMath::Max(8, ComfortDistanceDebugSegments);
+
+	auto DrawGroundCircle =
+		[World, Segments](const FVector& Center, float Radius, const FColor& Color)
+		{
+			if (Radius <= 0.0f)
+			{
+				return;
+			}
+
+			FVector PrevPoint =
+				Center + FVector(Radius, 0.0f, 0.0f);
+
+			for (int32 Index = 1; Index <= Segments; ++Index)
+			{
+				const float Angle =
+					2.0f * PI * static_cast<float>(Index) / static_cast<float>(Segments);
+
+				const FVector NextPoint =
+					Center +
+					FVector(
+						FMath::Cos(Angle) * Radius,
+						FMath::Sin(Angle) * Radius,
+						0.0f
+					);
+
+				DrawDebugLine(
+					World,
+					PrevPoint,
+					NextPoint,
+					Color,
+					false,
+					0.0f,
+					0,
+					2.0f
+				);
+
+				PrevPoint = NextPoint;
+			}
+		};
+
+	// 안쪽 원: 너무 가까운 거리
+	DrawGroundCircle(TargetCenter, TeleportNearDistance, FColor::Red);
+
+	// 바깥 원: 너무 먼 거리
+	DrawGroundCircle(TargetCenter, TeleportFarDistance, FColor::Green);
+
+	// 보스와 타겟 사이 거리선
+	DrawDebugLine(
+		World,
+		TargetCenter,
+		BossPoint,
+		FColor::Cyan,
+		false,
+		0.0f,
+		0,
+		2.0f
+	);
+
+	const TCHAR* ZoneText = TEXT("Comfort");
+
+	if (DistanceToTarget < TeleportNearDistance)
+	{
+		ZoneText = TEXT("Too Close");
+	}
+	else if (DistanceToTarget > TeleportFarDistance)
+	{
+		ZoneText = TEXT("Too Far");
+	}
+
+	const FString DebugText = FString::Printf(
+		TEXT("Dist: %.0f / Comfort: %.0f - %.0f / %s"),
+		DistanceToTarget,
+		TeleportNearDistance,
+		TeleportFarDistance,
+		ZoneText
+	);
+
+	DrawDebugString(
+		World,
+		BossPoint + FVector(0.0f, 0.0f, 120.0f),
+		DebugText,
+		nullptr,
+		FColor::White,
+		0.0f,
+		true
+	);
 }

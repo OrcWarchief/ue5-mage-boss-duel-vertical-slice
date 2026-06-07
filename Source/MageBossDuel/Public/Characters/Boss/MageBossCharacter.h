@@ -143,6 +143,20 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement")
 	bool bEnableRepositionTeleport = true;
 
+	// ===== Boss Debug =====
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BossAI|Debug")
+	bool bLocomotionOnlyDebug = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BossAI|Debug")
+	bool bDrawComfortDistanceDebug = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BossAI|Debug", meta = (ClampMin = "8", UIMin = "8"))
+	int32 ComfortDistanceDebugSegments = 96;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BossAI|Debug", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float ComfortDistanceDebugHeight = 8.0f;
+
 	// ===== Target =====
 
 	UFUNCTION(BlueprintCallable, Category = "Boss|Target")
@@ -667,4 +681,6 @@ private:
 	void OnPhaseTransitionMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	void ApplyBossPhaseTuning(EBossPhase NewPhase);
+
+	void DrawComfortDistanceDebug(float DistanceToTarget) const;
 };
