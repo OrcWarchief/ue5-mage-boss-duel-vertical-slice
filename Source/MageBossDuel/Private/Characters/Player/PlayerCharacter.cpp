@@ -14,6 +14,40 @@
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
 
+void APlayerCharacter::DrawChargedShotDebug() const
+{
+#if !(UE_BUILD_SHIPPING)
+	if (!GEngine)
+	{
+		return;
+	}
+
+	const float ChargeRatio =
+		MaxChargedAttackTime > 0.0f
+		? FMath::Clamp(CurrentChargedAttackTime / MaxChargedAttackTime, 0.0f, 1.0f)
+		: 0.0f;
+
+	const bool bCanRelease =
+		CurrentChargedAttackTime >= MinChargedAttackTime;
+
+	const FString DebugText = FString::Printf(
+		TEXT("Q Charge | Charging: %s | Time: %.2f / %.2f | Ratio: %.2f | CanRelease: %s"),
+		bIsChargingAttack ? TEXT("TRUE") : TEXT("FALSE"),
+		CurrentChargedAttackTime,
+		MaxChargedAttackTime,
+		ChargeRatio,
+		bCanRelease ? TEXT("TRUE") : TEXT("FALSE")
+	);
+
+	GEngine->AddOnScreenDebugMessage(
+		1001,
+		0.0f,
+		bIsChargingAttack ? FColor::Cyan : FColor::White,
+		DebugText
+	);
+#endif
+}
+
 APlayerCharacter::APlayerCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -46,6 +80,11 @@ void APlayerCharacter::Tick(float DeltaTime)
 	{
 		UpdateLockOn(DeltaTime);
 	}
+
+	if (bDrawChargedShotDebug)
+	{
+		DrawChargedShotDebug();
+	}
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -73,6 +112,13 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	if (ensure(IA_Equip))		EIC->BindAction(IA_Equip,		ETriggerEvent::Started, this, &APlayerCharacter::Equip);
 	if (ensure(IA_Dodge))		EIC->BindAction(IA_Dodge,		ETriggerEvent::Started, this, &APlayerCharacter::Dodge);
 	if (ensure(IA_BasicAttack))	EIC->BindAction(IA_BasicAttack, ETriggerEvent::Started, this, &APlayerCharacter::BasicAttack);
+	if (ensure(IA_ChargedAttack))
+	{
+		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Started,   this, &APlayerCharacter::StartChargedAttack);
+		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Triggered, this, &APlayerCharacter::UpdateChargedAttack);
+		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Completed, this, &APlayerCharacter::ReleaseChargedAttack);
+		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Canceled,  this, &APlayerCharacter::CancelChargedAttack);
+	}
 }
 
 void APlayerCharacter::SetCombatMode(EPlayerCombatMode NewCombatMode)
@@ -252,6 +298,107 @@ void APlayerCharacter::Dodge(const FInputActionValue& Value)
 void APlayerCharacter::BasicAttack(const FInputActionValue& Value)
 {
 	StartBasicAttack();
+}
+
+void APlayerCharacter::StartChargedAttack(const FInputActionValue& Value)
+{
+	if (!CanStartChargedAttack())
+	{
+		return;
+	}
+
+	bIsChargingAttack = true;
+	CurrentChargedAttackTime = 0.0f;
+}
+
+void APlayerCharacter::UpdateChargedAttack(const FInputActionValue& Value)
+{
+	if (!bIsChargingAttack)
+	{
+		return;
+	}
+
+	CurrentChargedAttackTime = FMath::Min(
+		CurrentChargedAttackTime + GetWorld()->GetDeltaSeconds(),
+		MaxChargedAttackTime
+	);
+
+}
+
+void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
+{
+	if (!bIsChargingAttack)
+	{
+		return;
+	}
+
+	const float ChargeRatio = FMath::Clamp(
+		CurrentChargedAttackTime / MaxChargedAttackTime,
+		0.0f,
+		1.0f
+	);
+
+	const bool bFullyOrPartiallyCharged = CurrentChargedAttackTime >= MinChargedAttackTime;
+
+	bIsChargingAttack = false;
+
+	if (!bFullyOrPartiallyCharged)
+	{
+		CancelChargedAttackInternal();
+		return;
+	}
+
+	// FireCharegedMagicShot(ChargeRatio);
+
+	CurrentChargedAttackTime = 0.0f;
+}
+
+void APlayerCharacter::CancelChargedAttack(const FInputActionValue& Value)
+{
+	CancelChargedAttackInternal();
+}
+
+bool APlayerCharacter::CanStartChargedAttack() const
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	if (bIsChargingAttack)
+	{
+		return false;
+	}
+
+	if (IsDodging())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State == ECharacterState::Hit ||
+		State == ECharacterState::Dead ||
+		State == ECharacterState::Attacking)
+	{
+		return false;
+	}
+
+	if (GetCurrentMana() < ChargedAttackManaCost)
+	{
+		return false;
+	}
+
+	return true;
+}
+
+void APlayerCharacter::CancelChargedAttackInternal()
+{
+	if (!bIsChargingAttack)
+	{
+		return;
+	}
+	bIsChargingAttack = false;
+	CurrentChargedAttackTime = 0.0f;
 }
 
 AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const

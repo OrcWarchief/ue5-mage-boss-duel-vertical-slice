@@ -29,6 +29,12 @@ class MAGEBOSSDUEL_API APlayerCharacter : public ABaseCharacter
 	GENERATED_BODY()
 	
 public:
+	//debug
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat|Charged Shot|Debug")
+	bool bDrawChargedShotDebug = true;
+	void DrawChargedShotDebug() const;
+	//debug
+
 	APlayerCharacter();
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
@@ -82,6 +88,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_BasicAttack;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_ChargedAttack = nullptr;
+
 	FVector2D MovementVector = FVector2D::ZeroVector;
 
 	void Move(const FInputActionValue& Value);
@@ -92,6 +101,14 @@ protected:
 	void Equip(const FInputActionValue& Value);
 	void Dodge(const FInputActionValue& Value);
 	void BasicAttack(const FInputActionValue& Value);
+
+	void StartChargedAttack(const FInputActionValue& Value);
+	void UpdateChargedAttack(const FInputActionValue& Value);
+	void ReleaseChargedAttack(const FInputActionValue& Value);
+	void CancelChargedAttack(const FInputActionValue& Value);
+
+	bool CanStartChargedAttack() const;
+	void CancelChargedAttackInternal();
 
 	virtual AActor* GetLockOnTargetActor_Implementation() const override;
 
@@ -108,6 +125,25 @@ protected:
 		EDodgeDirection Direction,
 		bool bHasDirectionalInput
 	) const override;
+
+	// ===== Charged Attack Runtime =====
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
+	bool bIsChargingAttack = false;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
+	float CurrentChargedAttackTime = 0.0f;
+
+	// ===== Charged Magic Shot Tuning =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack", meta = (ClampMin = "0.0"))
+	float MinChargedAttackTime = 0.35f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack", meta = (ClampMin = "0.1"))
+	float MaxChargedAttackTime = 1.5f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack", meta = (ClampMin = "0.0"))
+	float ChargedAttackManaCost = 25.0f;
 
 private:
 	// Camera
