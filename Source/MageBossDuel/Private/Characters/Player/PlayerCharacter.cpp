@@ -293,6 +293,7 @@ void APlayerCharacter::Equip(const FInputActionValue& Value)
 
 void APlayerCharacter::Dodge(const FInputActionValue& Value)
 {
+	CancelChargedAttackInternal();
 	TryStartDodge(MovementVector);
 }
 
@@ -396,6 +397,7 @@ void APlayerCharacter::CancelChargedAttackInternal()
 {
 	if (!bIsChargingAttack)
 	{
+		CurrentChargedAttackTime = 0.0f;
 		return;
 	}
 	bIsChargingAttack = false;
@@ -502,10 +504,17 @@ void APlayerCharacter::FireChargedAttack(float ChargeRatio)
 		return;
 	}
 
+	if (!TryConsumeMana(ChargedAttackManaCost))
+	{
+		Projectile->Destroy();
+		return;
+	}
+
+
 	const FHitPayload Payload = BuildChargedAttackPayload(ChargeRatio);
 	Projectile->SetHitPayload(Payload);
 
-	// OnChargedAttackFired(ChargeRatio);
+	OnChargedAttackFired(ChargeRatio);
 }
 
 FHitPayload APlayerCharacter::BuildChargedAttackPayload(float ChargeRatio) const

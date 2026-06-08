@@ -163,7 +163,7 @@ protected:
 	float ChargedAttackSpawnUpOffset = 60.0f;
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Shot")
-	void OnChargedMagicShotFired(float ChargeRatio);
+	void OnChargedAttackFired(float ChargeRatio);
 
 	void FireChargedAttack(float ChargeRatio);
 	FHitPayload BuildChargedAttackPayload(float ChargeRatio) const;
