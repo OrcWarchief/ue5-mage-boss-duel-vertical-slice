@@ -13,6 +13,7 @@
 #include "Engine/Engine.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
+#include "Projectiles/BaseMagicProjectile.h"
 
 void APlayerCharacter::DrawChargedShotDebug() const
 {
@@ -348,7 +349,7 @@ void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
 		return;
 	}
 
-	// FireCharegedMagicShot(ChargeRatio);
+	FireChargedAttack(ChargeRatio);
 
 	CurrentChargedAttackTime = 0.0f;
 }
@@ -452,6 +453,101 @@ UAnimMontage* APlayerCharacter::ResolveDodgeMontage(const FVector2D& MoveInput, 
 	}
 
 	return Super::ResolveDodgeMontage(MoveInput, Direction, bHasDirectionalInput);
+}
+
+void APlayerCharacter::FireChargedAttack(float ChargeRatio)
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (!ChargedAttackProjectileClass)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack]ChargedAttackProjectileClass is not set."));
+		return;
+	}
+
+	if (GetCurrentMana() < ChargedAttackManaCost)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack] Not enough mana to fire charged attack."));
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	TryConsumeMana(ChargedAttackManaCost);
+
+	const FTransform SpawnTransform = GetChargedAttackSpawnTransform();
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride = 
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	ABaseMagicProjectile* Projectile = World->SpawnActor<ABaseMagicProjectile>(
+		ChargedAttackProjectileClass,
+		SpawnTransform,
+		SpawnParams
+	);
+
+	if (!Projectile)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack] Failed to spawn projectile."));
+		return;
+	}
+
+	const FHitPayload Payload = BuildChargedAttackPayload(ChargeRatio);
+	Projectile->SetHitPayload(Payload);
+
+	// OnChargedAttackFired(ChargeRatio);
+}
+
+FHitPayload APlayerCharacter::BuildChargedAttackPayload(float ChargeRatio) const
+{
+	const float ClampedRatio = FMath::Clamp(ChargeRatio, 0.0f, 1.0f);
+
+	FHitPayload Payload = MinChargedAttackHitPayload;
+
+	Payload.Damage = FMath::Lerp(
+		MinChargedAttackHitPayload.Damage, 
+		MaxChargedAttackHitPayload.Damage, 
+		ClampedRatio
+	);
+
+	Payload.PoiseDamage = FMath::Lerp(
+		MinChargedAttackHitPayload.PoiseDamage,
+		MaxChargedAttackHitPayload.PoiseDamage,
+		ClampedRatio
+	);
+
+	if (ClampedRatio >= 0.95f)
+	{
+		Payload.ReactionType = MaxChargedAttackHitPayload.ReactionType;
+		Payload.bForceReaction = MaxChargedAttackHitPayload.bForceReaction;
+		Payload.bIgnorePoise = MaxChargedAttackHitPayload.bIgnorePoise;
+	}
+
+	return Payload;
+}
+
+FTransform APlayerCharacter::GetChargedAttackSpawnTransform() const
+{
+	const FVector Forward = GetActorForwardVector();
+
+	const FVector SpawnLocation =
+		GetActorLocation()
+		+ Forward * ChargedAttackSpawnForwardOffset
+		+ FVector::UpVector * ChargedAttackSpawnUpOffset;
+
+	const FRotator SpawnRotation = Forward.Rotation();
+
+	return FTransform(SpawnRotation, SpawnLocation);
 }
 
 void APlayerCharacter::StartLockOn(AActor* NewTarget)

@@ -145,6 +145,30 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack", meta = (ClampMin = "0.0"))
 	float ChargedAttackManaCost = 25.0f;
 
+	// ===== Charged Magic Shot Projectile =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot")
+	TSubclassOf<ABaseMagicProjectile> ChargedAttackProjectileClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot")
+	FHitPayload MinChargedAttackHitPayload;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot")
+	FHitPayload MaxChargedAttackHitPayload;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot", meta = (ClampMin = "0.0"))
+	float ChargedAttackSpawnForwardOffset = 80.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot", meta = (ClampMin = "0.0"))
+	float ChargedAttackSpawnUpOffset = 60.0f;
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Shot")
+	void OnChargedMagicShotFired(float ChargeRatio);
+
+	void FireChargedAttack(float ChargeRatio);
+	FHitPayload BuildChargedAttackPayload(float ChargeRatio) const;
+	FTransform GetChargedAttackSpawnTransform() const;
+
 private:
 	// Camera
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
