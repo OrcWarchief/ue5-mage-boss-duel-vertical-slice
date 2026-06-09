@@ -311,6 +311,10 @@ void APlayerCharacter::StartChargedAttack(const FInputActionValue& Value)
 
 	bIsChargingAttack = true;
 	CurrentChargedAttackTime = 0.0f;
+	bChargedAttackFullyChargedNotified = false;
+
+	OnChargedAttackStarted();
+	OnChargedAttackUpdated(0.0f, CurrentChargedAttackTime);
 }
 
 void APlayerCharacter::UpdateChargedAttack(const FInputActionValue& Value)
@@ -320,11 +324,30 @@ void APlayerCharacter::UpdateChargedAttack(const FInputActionValue& Value)
 		return;
 	}
 
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
 	CurrentChargedAttackTime = FMath::Min(
-		CurrentChargedAttackTime + GetWorld()->GetDeltaSeconds(),
+		CurrentChargedAttackTime + World->GetDeltaSeconds(),
 		MaxChargedAttackTime
 	);
 
+	const float ChargeRatio = FMath::Clamp(
+		CurrentChargedAttackTime / MaxChargedAttackTime,
+		0.0f,
+		1.0f
+	);
+
+	OnChargedAttackUpdated(ChargeRatio, CurrentChargedAttackTime);
+
+	if (!bChargedAttackFullyChargedNotified && ChargeRatio >= 1.0f)
+	{
+		bChargedAttackFullyChargedNotified = true;
+		OnChargedAttackFullyCharged();
+	}
 }
 
 void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
@@ -340,19 +363,26 @@ void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
 		1.0f
 	);
 
-	const bool bFullyOrPartiallyCharged = CurrentChargedAttackTime >= MinChargedAttackTime;
+	const bool bEnoughCharge =
+		CurrentChargedAttackTime >= MinChargedAttackTime;
 
 	bIsChargingAttack = false;
 
-	if (!bFullyOrPartiallyCharged)
+	if (!bEnoughCharge)
 	{
-		CancelChargedAttackInternal();
+		CurrentChargedAttackTime = 0.0f;
+		bChargedAttackFullyChargedNotified = false;
+
+		OnChargedAttackEnded(false, ChargeRatio);
 		return;
 	}
+
+	OnChargedAttackEnded(true, ChargeRatio);
 
 	FireChargedAttack(ChargeRatio);
 
 	CurrentChargedAttackTime = 0.0f;
+	bChargedAttackFullyChargedNotified = false;
 }
 
 void APlayerCharacter::CancelChargedAttack(const FInputActionValue& Value)
@@ -397,11 +427,20 @@ void APlayerCharacter::CancelChargedAttackInternal()
 {
 	if (!bIsChargingAttack)
 	{
-		CurrentChargedAttackTime = 0.0f;
 		return;
 	}
+
+	const float ChargeRatio = FMath::Clamp(
+		CurrentChargedAttackTime / MaxChargedAttackTime,
+		0.0f,
+		1.0f
+	);
+
 	bIsChargingAttack = false;
 	CurrentChargedAttackTime = 0.0f;
+	bChargedAttackFullyChargedNotified = false;
+
+	OnChargedAttackEnded(false, ChargeRatio);
 }
 
 AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const

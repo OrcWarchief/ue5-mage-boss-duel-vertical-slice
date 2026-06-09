@@ -134,6 +134,9 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
 	float CurrentChargedAttackTime = 0.0f;
 
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
+	bool bChargedAttackFullyChargedNotified = false;
+
 	// ===== Charged Magic Shot Tuning =====
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack", meta = (ClampMin = "0.0"))
@@ -162,8 +165,20 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot", meta = (ClampMin = "0.0"))
 	float ChargedAttackSpawnUpOffset = 60.0f;
 
-	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Shot")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Attack")
 	void OnChargedAttackFired(float ChargeRatio);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Attack")
+	void OnChargedAttackStarted();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Attack")
+	void OnChargedAttackUpdated(float ChargeRatio, float ChargeTime);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Attack")
+	void OnChargedAttackFullyCharged();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Attack")
+	void OnChargedAttackEnded(bool bFired, float ChargeRatio);
 
 	void FireChargedAttack(float ChargeRatio);
 	FHitPayload BuildChargedAttackPayload(float ChargeRatio) const;
