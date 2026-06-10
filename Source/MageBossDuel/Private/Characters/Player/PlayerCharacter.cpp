@@ -147,6 +147,8 @@ bool APlayerCharacter::CanStartStaffEquip() const
 
 	if (IsDodging() || IsStaffMode()) { return false; }
 
+	if (bIsChargingAttack) { return false; }
+
 	if (bStaffEquipInProgress) { return false; }
 
 	if (!StaffEquipMontage) { return false; }
@@ -288,6 +290,11 @@ void APlayerCharacter::Jump()
 
 void APlayerCharacter::Equip(const FInputActionValue& Value)
 {
+	if (bIsChargingAttack)
+	{
+		return;
+	}
+
 	StartStaffEquip();
 }
 
@@ -299,6 +306,11 @@ void APlayerCharacter::Dodge(const FInputActionValue& Value)
 
 void APlayerCharacter::BasicAttack(const FInputActionValue& Value)
 {
+	if (bIsChargingAttack)
+	{
+		return;
+	}
+
 	StartBasicAttack();
 }
 
@@ -377,9 +389,9 @@ void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
 		return;
 	}
 
-	OnChargedAttackEnded(true, ChargeRatio);
+	const bool bFired = FireChargedAttack(ChargeRatio);
 
-	FireChargedAttack(ChargeRatio);
+	OnChargedAttackEnded(bFired, ChargeRatio);
 
 	CurrentChargedAttackTime = 0.0f;
 	bChargedAttackFullyChargedNotified = false;
@@ -403,6 +415,11 @@ bool APlayerCharacter::CanStartChargedAttack() const
 	}
 
 	if (IsDodging())
+	{
+		return false;
+	}
+
+	if (bStaffEquipInProgress)
 	{
 		return false;
 	}
@@ -461,6 +478,20 @@ AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const
 	return LockOnTarget;
 }
 
+void APlayerCharacter::OnHitReaction_Implementation()
+{
+	CancelChargedAttackInternal();
+
+	Super::OnHitReaction_Implementation();
+}
+
+void APlayerCharacter::Die_Implementation()
+{
+	CancelChargedAttackInternal();
+
+	Super::Die_Implementation();
+}
+
 EDodgeDirection APlayerCharacter::ResolveDodgeDirection(const FVector2D& MoveInput, bool bHasDirectionalInput) const
 {
 	if (IsStaffMode() && !bHasDirectionalInput)
@@ -496,39 +527,37 @@ UAnimMontage* APlayerCharacter::ResolveDodgeMontage(const FVector2D& MoveInput, 
 	return Super::ResolveDodgeMontage(MoveInput, Direction, bHasDirectionalInput);
 }
 
-void APlayerCharacter::FireChargedAttack(float ChargeRatio)
+bool APlayerCharacter::FireChargedAttack(float ChargeRatio)
 {
 	if (!IsAlive())
 	{
-		return;
+		return false;
 	}
 
 	if (!ChargedAttackProjectileClass)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack]ChargedAttackProjectileClass is not set."));
-		return;
+		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack] ChargedAttackProjectileClass is not set."));
+		return false;
 	}
 
 	if (GetCurrentMana() < ChargedAttackManaCost)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack] Not enough mana to fire charged attack."));
-		return;
+		return false;
 	}
 
 	UWorld* World = GetWorld();
 	if (!World)
 	{
-		return;
+		return false;
 	}
-
-	TryConsumeMana(ChargedAttackManaCost);
 
 	const FTransform SpawnTransform = GetChargedAttackSpawnTransform();
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
 	SpawnParams.Instigator = this;
-	SpawnParams.SpawnCollisionHandlingOverride = 
+	SpawnParams.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
 	ABaseMagicProjectile* Projectile = World->SpawnActor<ABaseMagicProjectile>(
@@ -540,20 +569,21 @@ void APlayerCharacter::FireChargedAttack(float ChargeRatio)
 	if (!Projectile)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack] Failed to spawn projectile."));
-		return;
+		return false;
 	}
 
 	if (!TryConsumeMana(ChargedAttackManaCost))
 	{
 		Projectile->Destroy();
-		return;
+		return false;
 	}
-
 
 	const FHitPayload Payload = BuildChargedAttackPayload(ChargeRatio);
 	Projectile->SetHitPayload(Payload);
 
 	OnChargedAttackFired(ChargeRatio);
+
+	return true;
 }
 
 FHitPayload APlayerCharacter::BuildChargedAttackPayload(float ChargeRatio) const

@@ -111,6 +111,8 @@ protected:
 	void CancelChargedAttackInternal();
 
 	virtual AActor* GetLockOnTargetActor_Implementation() const override;
+	virtual void OnHitReaction_Implementation() override;
+	virtual void Die_Implementation() override;
 
 	virtual bool IsLockOnActive() const override { return bLockOnActive; }
 	virtual AActor* GetCurrentLockOnTarget() const override { return LockOnTarget.Get(); }
@@ -180,7 +182,7 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Attack")
 	void OnChargedAttackEnded(bool bFired, float ChargeRatio);
 
-	void FireChargedAttack(float ChargeRatio);
+	bool FireChargedAttack(float ChargeRatio);
 	FHitPayload BuildChargedAttackPayload(float ChargeRatio) const;
 	FTransform GetChargedAttackSpawnTransform() const;
 
