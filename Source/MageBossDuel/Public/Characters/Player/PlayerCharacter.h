@@ -152,23 +152,26 @@ protected:
 
 	// ===== Charged Magic Shot Projectile =====
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
 	TSubclassOf<ABaseMagicProjectile> ChargedAttackProjectileClass;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
 	FHitPayload MinChargedAttackHitPayload;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
 	FHitPayload MaxChargedAttackHitPayload;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack", meta = (ClampMin = "0.0"))
 	float ChargedAttackSpawnForwardOffset = 80.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Shot", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack", meta = (ClampMin = "0.0"))
 	float ChargedAttackSpawnUpOffset = 60.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
+	FName ChargedAttackMuzzleSocketName = TEXT("Muzzle");
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Attack")
-	void OnChargedAttackFired(float ChargeRatio);
+	void OnChargedAttackFired(float ChargeRatio, const FTransform& SpawnTransform);
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Attack")
 	void OnChargedAttackStarted();
@@ -183,8 +186,10 @@ protected:
 	void OnChargedAttackEnded(bool bFired, float ChargeRatio);
 
 	bool FireChargedAttack(float ChargeRatio);
+
 	FHitPayload BuildChargedAttackPayload(float ChargeRatio) const;
-	FTransform GetChargedAttackSpawnTransform() const;
+	FTransform GetChargedAttackSpawnTransform(AActor* TargetActor) const;
+	FVector GetChargedAttackMuzzleLocation() const;
 
 private:
 	// Camera

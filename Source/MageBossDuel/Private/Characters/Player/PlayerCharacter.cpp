@@ -552,7 +552,8 @@ bool APlayerCharacter::FireChargedAttack(float ChargeRatio)
 		return false;
 	}
 
-	const FTransform SpawnTransform = GetChargedAttackSpawnTransform();
+	AActor* TargetActor = ResolveBasicAttackTarget();
+	const FTransform SpawnTransform = GetChargedAttackSpawnTransform(TargetActor);
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
@@ -581,7 +582,7 @@ bool APlayerCharacter::FireChargedAttack(float ChargeRatio)
 	const FHitPayload Payload = BuildChargedAttackPayload(ChargeRatio);
 	Projectile->SetHitPayload(Payload);
 
-	OnChargedAttackFired(ChargeRatio);
+	OnChargedAttackFired(ChargeRatio, SpawnTransform);
 
 	return true;
 }
@@ -614,18 +615,54 @@ FHitPayload APlayerCharacter::BuildChargedAttackPayload(float ChargeRatio) const
 	return Payload;
 }
 
-FTransform APlayerCharacter::GetChargedAttackSpawnTransform() const
+FTransform APlayerCharacter::GetChargedAttackSpawnTransform(AActor* TargetActor) const
 {
-	const FVector Forward = GetActorForwardVector();
+	const FVector SpawnLocation = GetChargedAttackMuzzleLocation();
 
-	const FVector SpawnLocation =
-		GetActorLocation()
-		+ Forward * ChargedAttackSpawnForwardOffset
-		+ FVector::UpVector * ChargedAttackSpawnUpOffset;
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetControllerViewPoint(ViewLocation, ViewRotation);
 
-	const FRotator SpawnRotation = Forward.Rotation();
+	FRotator SpawnRotation = ViewRotation;
+
+	if (IsValid(TargetActor))
+	{
+		const FVector AimLocation = GetTargetAimLocation(TargetActor);
+		const FVector AimDirection = (AimLocation - SpawnLocation).GetSafeNormal();
+
+		if (!AimDirection.IsNearlyZero())
+		{
+			SpawnRotation = AimDirection.Rotation();
+		}
+	}
 
 	return FTransform(SpawnRotation, SpawnLocation);
+}
+
+FVector APlayerCharacter::GetChargedAttackMuzzleLocation() const
+{
+	if (StaffWeaponMesh)
+	{
+		if (StaffWeaponMesh->DoesSocketExist(ChargedAttackMuzzleSocketName))
+		{
+			return StaffWeaponMesh->GetSocketLocation(ChargedAttackMuzzleSocketName);
+		}
+
+		return StaffWeaponMesh->GetComponentLocation();
+	}
+
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		static const FName HandSocketName(TEXT("palm_r_Socket"));
+		if (MeshComp->DoesSocketExist(HandSocketName))
+		{
+			return MeshComp->GetSocketLocation(HandSocketName);
+		}
+	}
+
+	return GetActorLocation()
+		+ GetActorForwardVector() * ChargedAttackSpawnForwardOffset
+		+ FVector::UpVector * ChargedAttackSpawnUpOffset;
 }
 
 void APlayerCharacter::StartLockOn(AActor* NewTarget)
