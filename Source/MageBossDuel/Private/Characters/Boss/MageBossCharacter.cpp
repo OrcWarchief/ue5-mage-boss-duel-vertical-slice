@@ -1415,17 +1415,13 @@ bool AMageBossCharacter::FindTeleportDestination(
 	EDodgeDirection& OutResolvedDirection
 ) const
 {
-	const UWorld* World = GetWorld();
-	const UCapsuleComponent* Capsule = GetCapsuleComponent();
-
-	if (!World || !Capsule)
+	// 1. 거리 재배치 상황에서는 플레이어 기준 목적지를 우선 사용
+	if (FindTargetRelativeRepositionDestination(OutLocation, OutResolvedDirection))
 	{
-		return false;
+		return true;
 	}
 
-	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
-	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
-
+	// 2. 실패하면 기존 방식으로 fallback
 	TArray<EDodgeDirection> DirectionOrder;
 	DirectionOrder.Reserve(9);
 
@@ -1464,72 +1460,252 @@ bool AMageBossCharacter::FindTeleportDestination(
 			const FVector RawCandidate =
 				GetActorLocation() + DirectionWorld * CandidateDistance;
 
-			const FVector TraceStart =
-				RawCandidate + FVector::UpVector * TeleportGroundTraceUp;
-
-			const FVector TraceEnd =
-				RawCandidate - FVector::UpVector * TeleportGroundTraceDown;
-
-			FHitResult GroundHit;
-			FCollisionQueryParams GroundQueryParams(
-				FName(TEXT("BossTeleportGroundTrace")),
-				false,
-				this
-			);
-
-			const bool bGroundHit = World->LineTraceSingleByChannel(
-				GroundHit,
-				TraceStart,
-				TraceEnd,
-				TeleportGroundTraceChannel.GetValue(),
-				GroundQueryParams
-			);
-
-			if (!bGroundHit)
+			FVector CandidateLocation = FVector::ZeroVector;
+			if (!ResolveTeleportCandidateLocation(RawCandidate, CandidateLocation))
 			{
 				continue;
 			}
 
-			if (GroundHit.ImpactNormal.Z < TeleportMinGroundNormalZ)
-			{
-				continue;
-			}
-
-			const FVector CapsuleLocation =
-				GroundHit.ImpactPoint +
-				FVector(0.0f, 0.0f, CapsuleHalfHeight + TeleportGroundOffset);
-
-			const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(
-				FMath::Max(1.0f, CapsuleRadius - 2.0f),
-				FMath::Max(1.0f, CapsuleHalfHeight - 2.0f)
-			);
-
-			FCollisionQueryParams OverlapQueryParams(
-				FName(TEXT("BossTeleportOverlap")),
-				false,
-				this
-			);
-
-			const bool bBlocked = World->OverlapBlockingTestByChannel(
-				CapsuleLocation,
-				FQuat::Identity,
-				TeleportOverlapChannel.GetValue(),
-				CapsuleShape,
-				OverlapQueryParams
-			);
-
-			if (bBlocked)
-			{
-				continue;
-			}
-
-			OutLocation = CapsuleLocation;
+			OutLocation = CandidateLocation;
 			OutResolvedDirection = CandidateDirection;
 			return true;
 		}
 	}
 
 	return false;
+}
+
+bool AMageBossCharacter::FindTargetRelativeRepositionDestination(FVector& OutLocation, EDodgeDirection& OutResolvedDirection) const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+	if (!IsValid(Target))
+	{
+		return false;
+	}
+
+	const FVector BossLocation = GetActorLocation();
+	const FVector TargetLocation = Target->GetActorLocation();
+
+	const float DistanceToTarget = FVector::Dist2D(BossLocation, TargetLocation);
+	if (!ShouldRepositionWithTeleport(DistanceToTarget))
+	{
+		return false;
+	}
+
+	FVector FromTargetToBoss = BossLocation - TargetLocation;
+	FromTargetToBoss.Z = 0.0f;
+
+	if (FromTargetToBoss.IsNearlyZero())
+	{
+		FromTargetToBoss = -Target->GetActorForwardVector();
+		FromTargetToBoss.Z = 0.0f;
+	}
+
+	if (!FromTargetToBoss.Normalize())
+	{
+		return false;
+	}
+
+	const float NearDistance = FMath::Max(0.0f, TeleportNearDistance);
+	const float FarDistance = FMath::Max(NearDistance + 1.0f, TeleportFarDistance);
+
+	const float MinDesiredDistance = FMath::Max(
+		TeleportMinDistance,
+		NearDistance + 100.0f
+	);
+
+	const float MaxDesiredDistance = FMath::Max(
+		MinDesiredDistance,
+		FarDistance - 100.0f
+	);
+
+	const float DesiredDistance = FMath::Clamp(
+		RepositionDesiredDistance + FMath::FRandRange(-RepositionDistanceJitter, RepositionDistanceJitter),
+		MinDesiredDistance,
+		MaxDesiredDistance
+	);
+
+	const TArray<float> AngleOffsets =
+	{
+		0.0f,
+		45.0f,
+		-45.0f,
+		90.0f,
+		-90.0f,
+		135.0f,
+		-135.0f,
+		180.0f
+	};
+
+	for (const float AngleOffset : AngleOffsets)
+	{
+		FVector CandidateDirection =
+			FromTargetToBoss.RotateAngleAxis(AngleOffset, FVector::UpVector);
+
+		CandidateDirection.Z = 0.0f;
+
+		if (!CandidateDirection.Normalize())
+		{
+			continue;
+		}
+
+		const FVector RawCandidate =
+			TargetLocation + CandidateDirection * DesiredDistance;
+
+		FVector CandidateLocation = FVector::ZeroVector;
+		if (!ResolveTeleportCandidateLocation(RawCandidate, CandidateLocation))
+		{
+			continue;
+		}
+
+		const FVector MoveDirection = CandidateLocation - BossLocation;
+		OutResolvedDirection = ResolveTeleportDirectionFromWorldMove(MoveDirection);
+
+		if (OutResolvedDirection == EDodgeDirection::None)
+		{
+			OutResolvedDirection = ChooseTeleportDirectionForAI();
+		}
+
+		OutLocation = CandidateLocation;
+		return true;
+	}
+
+	return false;
+}
+
+bool AMageBossCharacter::ResolveTeleportCandidateLocation(const FVector& RawCandidate, FVector& OutLocation) const
+{
+	const UWorld* World = GetWorld();
+	const UCapsuleComponent* Capsule = GetCapsuleComponent();
+
+	if (!World || !Capsule)
+	{
+		return false;
+	}
+
+	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+
+	const FVector TraceStart =
+		RawCandidate + FVector::UpVector * TeleportGroundTraceUp;
+
+	const FVector TraceEnd =
+		RawCandidate - FVector::UpVector * TeleportGroundTraceDown;
+
+	FHitResult GroundHit;
+	FCollisionQueryParams GroundQueryParams(
+		FName(TEXT("BossTeleportGroundTrace")),
+		false,
+		this
+	);
+
+	const bool bGroundHit = World->LineTraceSingleByChannel(
+		GroundHit,
+		TraceStart,
+		TraceEnd,
+		TeleportGroundTraceChannel.GetValue(),
+		GroundQueryParams
+	);
+
+	if (!bGroundHit)
+	{
+		return false;
+	}
+
+	if (GroundHit.ImpactNormal.Z < TeleportMinGroundNormalZ)
+	{
+		return false;
+	}
+
+	const FVector CapsuleLocation =
+		GroundHit.ImpactPoint +
+		FVector(0.0f, 0.0f, CapsuleHalfHeight + TeleportGroundOffset);
+
+	const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(
+		FMath::Max(1.0f, CapsuleRadius - 2.0f),
+		FMath::Max(1.0f, CapsuleHalfHeight - 2.0f)
+	);
+
+	FCollisionQueryParams OverlapQueryParams(
+		FName(TEXT("BossTeleportOverlap")),
+		false,
+		this
+	);
+
+	const bool bBlocked = World->OverlapBlockingTestByChannel(
+		CapsuleLocation,
+		FQuat::Identity,
+		TeleportOverlapChannel.GetValue(),
+		CapsuleShape,
+		OverlapQueryParams
+	);
+
+	if (bBlocked)
+	{
+		return false;
+	}
+
+	OutLocation = CapsuleLocation;
+	return true;
+}
+
+EDodgeDirection AMageBossCharacter::ResolveTeleportDirectionFromWorldMove(const FVector& WorldMoveDirection) const
+{
+	FVector MoveDirection = WorldMoveDirection;
+	MoveDirection.Z = 0.0f;
+
+	if (!MoveDirection.Normalize())
+	{
+		return EDodgeDirection::None;
+	}
+
+	FVector Forward = GetLockOnBasisForward();
+	Forward.Z = 0.0f;
+	Forward.Normalize();
+
+	FVector Right = GetLockOnBasisRight();
+	Right.Z = 0.0f;
+	Right.Normalize();
+
+	const float ForwardDot = FVector::DotProduct(MoveDirection, Forward);
+	const float RightDot = FVector::DotProduct(MoveDirection, Right);
+
+	constexpr float ForwardThreshold = 0.5f;
+	constexpr float SideThreshold = 0.35f;
+
+	if (ForwardDot > ForwardThreshold)
+	{
+		if (RightDot > SideThreshold)
+		{
+			return EDodgeDirection::ForwardRight;
+		}
+
+		if (RightDot < -SideThreshold)
+		{
+			return EDodgeDirection::ForwardLeft;
+		}
+
+		return EDodgeDirection::Forward;
+	}
+
+	if (ForwardDot < -ForwardThreshold)
+	{
+		if (RightDot > SideThreshold)
+		{
+			return EDodgeDirection::BackwardRight;
+		}
+
+		if (RightDot < -SideThreshold)
+		{
+			return EDodgeDirection::BackwardLeft;
+		}
+
+		return EDodgeDirection::Backward;
+	}
+
+	return RightDot >= 0.0f
+		? EDodgeDirection::Right
+		: EDodgeDirection::Left;
 }
 
 FVector AMageBossCharacter::TeleportDirectionToWorld(EDodgeDirection Direction) const
@@ -2030,6 +2206,11 @@ bool AMageBossCharacter::IsBossSkillOptionAllowed(const FBossSkillOption& Option
 	}
 
 	if (Option.SkillType == EBossSkillType::None)
+	{
+		return false;
+	}
+
+	if (Option.SkillType == EBossSkillType::Teleport && !bAllowTeleportAsWeightedSkill)
 	{
 		return false;
 	}

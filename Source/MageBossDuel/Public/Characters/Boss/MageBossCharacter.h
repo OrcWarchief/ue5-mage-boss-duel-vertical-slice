@@ -329,6 +329,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|AI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float TeleportFarDistance = 900.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|AI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float RepositionDesiredDistance = 700.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|AI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float RepositionDistanceJitter = 100.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport")
 	bool bFaceTargetOnTeleportStart = true;
 
@@ -465,6 +471,9 @@ protected:
 	bool bAllowBasicAttackFallback = true;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAllowTeleportAsWeightedSkill = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
 	bool bBlockOtherSkillsDuringRunePrisonPattern = true;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
@@ -571,6 +580,20 @@ private:
 		EDodgeDirection RequestedDirection,
 		FVector& OutLocation,
 		EDodgeDirection& OutResolvedDirection
+	) const;
+
+	bool FindTargetRelativeRepositionDestination(
+		FVector& OutLocation,
+		EDodgeDirection& OutResolvedDirection
+	) const;
+
+	bool ResolveTeleportCandidateLocation(
+		const FVector& RawCandidate,
+		FVector& OutLocation
+	) const;
+
+	EDodgeDirection ResolveTeleportDirectionFromWorldMove(
+		const FVector& WorldMoveDirection
 	) const;
 
 	FVector TeleportDirectionToWorld(EDodgeDirection Direction) const;
