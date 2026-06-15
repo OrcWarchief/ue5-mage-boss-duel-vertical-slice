@@ -2195,6 +2195,28 @@ bool AMageBossCharacter::BuildBossSkillCandidates(TArray<FBossSkillOption>& OutC
 		}
 	}
 
+	if (OutCandidates.Num() <= 1)
+	{
+		return OutCandidates.Num() > 0;
+	}
+
+	const bool bHasAlternativeToLastSkill = OutCandidates.ContainsByPredicate(
+		[this](const FBossSkillOption& Option)
+		{
+			return Option.bAllowRepeat || Option.SkillType != LastStartedBossSkill;
+		}
+	);
+
+	if (bHasAlternativeToLastSkill)
+	{
+		OutCandidates.RemoveAll(
+			[this](const FBossSkillOption& Option)
+			{
+				return !Option.bAllowRepeat && Option.SkillType == LastStartedBossSkill;
+			}
+		);
+	}
+
 	return OutCandidates.Num() > 0;
 }
 
@@ -2239,11 +2261,6 @@ bool AMageBossCharacter::IsBossSkillOptionAllowed(const FBossSkillOption& Option
 
 	if (HealthPercent < Option.MinHealthPercent ||
 		HealthPercent > Option.MaxHealthPercent)
-	{
-		return false;
-	}
-
-	if (!Option.bAllowRepeat && Option.SkillType == LastStartedBossSkill)
 	{
 		return false;
 	}
