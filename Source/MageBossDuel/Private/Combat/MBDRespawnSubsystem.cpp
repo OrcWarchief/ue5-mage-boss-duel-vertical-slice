@@ -83,6 +83,19 @@ bool UMBDRespawnSubsystem::RespawnPlayerAtActiveRestPoint(APlayerController* Pla
 		BaseCharacter->ReviveForRespawn();
 	}
 
+	if (ABaseCharacter* BaseCharacter = Cast<ABaseCharacter>(PlayerPawn))
+	{
+		BaseCharacter->ReviveForRespawn();
+	}
+
+	// 리스폰 후 PlayerController 입력 상태 복구
+	PlayerController->ResetIgnoreMoveInput();
+	PlayerController->ResetIgnoreLookInput();
+
+	FInputModeGameOnly InputMode;
+	PlayerController->SetInputMode(InputMode);
+	PlayerController->bShowMouseCursor = false;
+
 	return true;
 }
 

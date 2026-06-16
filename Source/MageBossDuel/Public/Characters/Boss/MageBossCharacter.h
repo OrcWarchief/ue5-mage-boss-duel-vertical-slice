@@ -686,6 +686,9 @@ private:
 	bool bIsPhaseTransitioning = false;
 
 	UPROPERTY(Transient)
+	bool bResumeBossBrainAfterPhaseTransition = false;
+
+	UPROPERTY(Transient)
 	EBossPhase PendingBossPhase = EBossPhase::Phase1;
 
 	UPROPERTY(Transient)

@@ -71,6 +71,8 @@ class MAGEBOSSDUEL_API ABaseCharacter : public ACharacter
 public:
     ABaseCharacter();
 
+    virtual void Tick(float DeltaTime) override;
+
     // ===== Health / Stats =====
     UFUNCTION(BlueprintCallable, Category = "Stats|Health")
     void SetHealth(float NewHealth);
@@ -116,6 +118,15 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Stats|Mana")
     float GetManaPercent() const { return MaxMana > 0.f ? CurrentMana / MaxMana : 0.f; }
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stats|Mana|Regen")
+    bool bEnableManaRegeneration = false;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stats|Mana|Regen", meta = (ClampMin = "0.0", UIMin = "0.0", DisplayName = "Mana Regen / Second"))
+    float ManaRegenRate = 8.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stats|Mana|Regen", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+    float ManaRegenDelayAfterSpend = 0.75f;
 
     // ===== HUD / UI =====
     UPROPERTY(BlueprintAssignable, Category = "UI|Events")
@@ -276,6 +287,8 @@ protected:
     bool TryConsumeMana(float Cost);
     void BroadcastHealthChanged();
     void BroadcastManaChanged();
+    void SetMana(float NewMana);
+    void UpdateManaRegeneration(float DeltaTime);
 
     EHitReactionType ResolveHitReaction(const FHitPayload& HitPayload, bool bPoiseBroken) const;
 
@@ -492,6 +505,9 @@ private:
     /** 현재 Mana. [0..MaxMana] */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats|Mana", meta = (AllowPrivateAccess = "true"))
     float CurrentMana = 0.f;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats|Mana", meta = (AllowPrivateAccess = "true"))
+    float LastManaSpendTime = -9999.0f;
 
     /** 달리기 상태(속도 적용은 CharacterMovement 쪽에서). */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Movement|Runtime", meta = (AllowPrivateAccess = "true"))

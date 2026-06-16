@@ -767,7 +767,10 @@ void AMageBossCharacter::FinishBossPhaseTransition()
 	OnBossPhaseChanged(CurrentBossPhase);
 	OnBossPhaseTransitionFinished(CurrentBossPhase);
 
-	if (bAutoStartBossBrain && IsAlive())
+	const bool bShouldResumeBossBrain = bResumeBossBrainAfterPhaseTransition;
+	bResumeBossBrainAfterPhaseTransition = false;
+
+	if (bShouldResumeBossBrain && IsAlive() && !IsBossBrainRunning())
 	{
 		StartBossBrain();
 	}
@@ -1032,6 +1035,7 @@ void AMageBossCharacter::Die_Implementation()
 	}
 
 	bIsPhaseTransitioning = false;
+	bResumeBossBrainAfterPhaseTransition = false;
 	ActivePhaseTransitionMontage = nullptr;
 	SetInvulnerable(false);
 
@@ -2727,6 +2731,7 @@ void AMageBossCharacter::BeginBossPhaseTransition(EBossPhase TargetPhase)
 	bIsPhaseTransitioning = true;
 	PendingBossPhase = TargetPhase;
 	ActivePhaseTransitionMontage = GetPhaseTransitionMontage(TargetPhase);
+	bResumeBossBrainAfterPhaseTransition = IsBossBrainRunning();
 
 	if (bStopBrainDuringPhaseTransition)
 	{
