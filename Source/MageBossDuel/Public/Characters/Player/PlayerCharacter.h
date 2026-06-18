@@ -61,6 +61,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Equipment|Staff")
 	bool IsStaffMode() const { return CombatMode == EPlayerCombatMode::Staff; }
 
+	// ===== Charged Attack AnimNotify =====
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Charged Attack|AnimNotify")
+	void PerformChargedAttackRelease();
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -128,6 +133,20 @@ protected:
 		bool bHasDirectionalInput
 	) const override;
 
+	// ===== Charged Attack Animation =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack|Anim")
+	TObjectPtr<UAnimMontage> ChargedAttackMontage = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack|Anim")
+	FName ChargedAttackStartSection = TEXT("ChargeStart");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack|Anim")
+	FName ChargedAttackLoopSection = TEXT("ChargeLoop");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack|Anim")
+	FName ChargedAttackReleaseSection = TEXT("ChargeRelease");
+
 	// ===== Charged Attack Runtime =====
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
@@ -139,7 +158,19 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
 	bool bChargedAttackFullyChargedNotified = false;
 
-	// ===== Charged Magic Shot Tuning =====
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
+	bool bChargedAttackReleasePending = false;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
+	bool bChargedAttackReleaseResolved = false;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
+	float PendingChargedAttackRatio = 0.0f;
+
+	float SavedChargedAttackMaxWalkSpeed = 0.0f;
+	bool bHasSavedChargedAttackMoveSpeed = false;
+
+	// ===== Charged Attack Tuning =====
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack", meta = (ClampMin = "0.0"))
 	float MinChargedAttackTime = 0.35f;
@@ -150,7 +181,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack", meta = (ClampMin = "0.0"))
 	float ChargedAttackManaCost = 25.0f;
 
-	// ===== Charged Magic Shot Projectile =====
+	// ===== Charged Attack Movement =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack|Movement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ChargedAttackMoveSpeedMultiplier = 0.35f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack|Movement")
+	bool bLockMovementDuringChargedAttackRelease = true;
+
+	// ===== Charged Attack Projectile =====
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Charged Attack")
 	TSubclassOf<ABaseMagicProjectile> ChargedAttackProjectileClass;
@@ -185,11 +224,19 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Charged Attack")
 	void OnChargedAttackEnded(bool bFired, float ChargeRatio);
 
+	void OnChargedAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
 	bool FireChargedAttack(float ChargeRatio);
 
 	FHitPayload BuildChargedAttackPayload(float ChargeRatio) const;
 	FTransform GetChargedAttackSpawnTransform(AActor* TargetActor) const;
 	FVector GetChargedAttackMuzzleLocation() const;
+
+	void ApplyChargedAttackMovementRestriction();
+	void ApplyChargedAttackReleaseMovementRestriction();
+	void RestoreChargedAttackMovement();
+
+	void FinishChargedAttackSequence();
 
 private:
 	// Camera

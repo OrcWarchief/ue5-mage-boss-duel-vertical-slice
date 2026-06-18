@@ -321,12 +321,39 @@ void APlayerCharacter::StartChargedAttack(const FInputActionValue& Value)
 		return;
 	}
 
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+
+	if (!AnimInstance || !ChargedAttackMontage)
+	{
+		return;
+	}
 	bIsChargingAttack = true;
+	bChargedAttackReleasePending = false;
+	bChargedAttackReleaseResolved = false;
+
+	PendingChargedAttackRatio = 0.0f;
 	CurrentChargedAttackTime = 0.0f;
 	bChargedAttackFullyChargedNotified = false;
 
+	ApplyChargedAttackMovementRestriction();
+
+	const float PlayedLength = AnimInstance->Montage_Play(ChargedAttackMontage, 1.0f);
+
+	if (PlayedLength <= 0.0f)
+	{
+		CancelChargedAttackInternal();
+		return;
+	}
+
+	AnimInstance->Montage_JumpToSection(ChargedAttackStartSection, ChargedAttackMontage);
+
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &APlayerCharacter::OnChargedAttackMontageEnded);
+
+	AnimInstance->Montage_SetEndDelegate(EndDelegate,ChargedAttackMontage);
+
 	OnChargedAttackStarted();
-	OnChargedAttackUpdated(0.0f, CurrentChargedAttackTime);
+	OnChargedAttackUpdated(0.0f, 0.0f);
 }
 
 void APlayerCharacter::UpdateChargedAttack(const FInputActionValue& Value)
@@ -375,26 +402,37 @@ void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
 		1.0f
 	);
 
-	const bool bEnoughCharge =
-		CurrentChargedAttackTime >= MinChargedAttackTime;
+	const bool bEnoughCharge = CurrentChargedAttackTime >= MinChargedAttackTime;
 
 	bIsChargingAttack = false;
 
 	if (!bEnoughCharge)
 	{
-		CurrentChargedAttackTime = 0.0f;
-		bChargedAttackFullyChargedNotified = false;
-
-		OnChargedAttackEnded(false, ChargeRatio);
+		CancelChargedAttackInternal();
 		return;
 	}
 
-	const bool bFired = FireChargedAttack(ChargeRatio);
+	bIsChargingAttack = false;
+	bChargedAttackReleasePending = true;
+	bChargedAttackReleaseResolved = false;
+	PendingChargedAttackRatio = ChargeRatio;
 
-	OnChargedAttackEnded(bFired, ChargeRatio);
+	ApplyChargedAttackReleaseMovementRestriction();
 
-	CurrentChargedAttackTime = 0.0f;
-	bChargedAttackFullyChargedNotified = false;
+	SetCharacterState(ECharacterState::Attacking);
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+
+	if (!AnimInstance ||
+		!ChargedAttackMontage ||
+		!AnimInstance->Montage_IsPlaying(ChargedAttackMontage))
+	{
+		PerformChargedAttackRelease();
+		FinishChargedAttackSequence();
+		return;
+	}
+
+	AnimInstance->Montage_JumpToSection(ChargedAttackReleaseSection, ChargedAttackMontage);
 }
 
 void APlayerCharacter::CancelChargedAttack(const FInputActionValue& Value)
@@ -409,7 +447,7 @@ bool APlayerCharacter::CanStartChargedAttack() const
 		return false;
 	}
 
-	if (bIsChargingAttack)
+	if (bIsChargingAttack || bChargedAttackReleasePending)
 	{
 		return false;
 	}
@@ -442,22 +480,44 @@ bool APlayerCharacter::CanStartChargedAttack() const
 
 void APlayerCharacter::CancelChargedAttackInternal()
 {
-	if (!bIsChargingAttack)
+	const bool bWasCharging = bIsChargingAttack;
+	const bool bWasReleasing = bChargedAttackReleasePending;
+
+	if (!bWasCharging && !bWasReleasing)
 	{
 		return;
 	}
 
-	const float ChargeRatio = FMath::Clamp(
-		CurrentChargedAttackTime / MaxChargedAttackTime,
-		0.0f,
-		1.0f
-	);
+	const float ChargeRatio = bWasCharging
+		? FMath::Clamp(
+			CurrentChargedAttackTime / MaxChargedAttackTime,
+			0.0f,
+			1.0f
+		)
+		: PendingChargedAttackRatio;
+
+	if (bWasCharging || (bWasReleasing && !bChargedAttackReleaseResolved))
+	{
+		OnChargedAttackEnded(false, ChargeRatio);
+	}
 
 	bIsChargingAttack = false;
+	bChargedAttackReleasePending = false;
+	bChargedAttackReleaseResolved = false;
+
 	CurrentChargedAttackTime = 0.0f;
+	PendingChargedAttackRatio = 0.0f;
 	bChargedAttackFullyChargedNotified = false;
 
-	OnChargedAttackEnded(false, ChargeRatio);
+	RestoreChargedAttackMovement();
+
+	if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+	{
+		if (ChargedAttackMontage && AnimInstance->Montage_IsPlaying(ChargedAttackMontage))
+		{
+			AnimInstance->Montage_Stop(0.1f, ChargedAttackMontage);
+		}
+	}
 }
 
 AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const
@@ -525,6 +585,27 @@ UAnimMontage* APlayerCharacter::ResolveDodgeMontage(const FVector2D& MoveInput, 
 	}
 
 	return Super::ResolveDodgeMontage(MoveInput, Direction, bHasDirectionalInput);
+}
+
+void APlayerCharacter::OnChargedAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != ChargedAttackMontage.Get())
+	{
+		return;
+	}
+
+	if (bChargedAttackReleasePending && !bChargedAttackReleaseResolved)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[ChargedAttack] Release montage ended without Fire Charged Attack Notify.")
+		);
+
+		OnChargedAttackEnded(false, PendingChargedAttackRatio);
+	}
+
+	FinishChargedAttackSequence();
 }
 
 bool APlayerCharacter::FireChargedAttack(float ChargeRatio)
@@ -663,6 +744,86 @@ FVector APlayerCharacter::GetChargedAttackMuzzleLocation() const
 	return GetActorLocation()
 		+ GetActorForwardVector() * ChargedAttackSpawnForwardOffset
 		+ FVector::UpVector * ChargedAttackSpawnUpOffset;
+}
+
+void APlayerCharacter::ApplyChargedAttackMovementRestriction()
+{
+	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	if (!MoveComp)
+	{
+		return;
+	}
+
+	if (!bHasSavedChargedAttackMoveSpeed)
+	{
+		SavedChargedAttackMaxWalkSpeed = MoveComp->MaxWalkSpeed;
+		bHasSavedChargedAttackMoveSpeed = true;
+	}
+
+	MoveComp->MaxWalkSpeed = SavedChargedAttackMaxWalkSpeed * FMath::Clamp(ChargedAttackMoveSpeedMultiplier, 0.0f, 1.0f);
+}
+
+void APlayerCharacter::ApplyChargedAttackReleaseMovementRestriction()
+{
+	if (!bLockMovementDuringChargedAttackRelease)
+	{
+		return;
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->MaxWalkSpeed = 0.0f;
+		MoveComp->StopMovementImmediately();
+	}
+}
+
+void APlayerCharacter::RestoreChargedAttackMovement()
+{
+	if (!bHasSavedChargedAttackMoveSpeed)
+	{
+		return;
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->MaxWalkSpeed = SavedChargedAttackMaxWalkSpeed;
+	}
+
+	SavedChargedAttackMaxWalkSpeed = 0.0f;
+	bHasSavedChargedAttackMoveSpeed = false;
+}
+
+void APlayerCharacter::FinishChargedAttackSequence()
+{
+	bIsChargingAttack = false;
+	bChargedAttackReleasePending = false;
+	bChargedAttackReleaseResolved = false;
+
+	CurrentChargedAttackTime = 0.0f;
+	PendingChargedAttackRatio = 0.0f;
+	bChargedAttackFullyChargedNotified = false;
+
+	RestoreChargedAttackMovement();
+
+	if (IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(GetVelocity().Size2D() > 3.0f ? ECharacterState::Moving : ECharacterState::Idle);
+	}
+}
+
+void APlayerCharacter::PerformChargedAttackRelease()
+{
+	if (!bChargedAttackReleasePending ||
+		bChargedAttackReleaseResolved)
+	{
+		return;
+	}
+
+	bChargedAttackReleaseResolved = true;
+
+	const bool bFired = FireChargedAttack(PendingChargedAttackRatio);
+
+	OnChargedAttackEnded(bFired, PendingChargedAttackRatio);
 }
 
 void APlayerCharacter::StartLockOn(AActor* NewTarget)
