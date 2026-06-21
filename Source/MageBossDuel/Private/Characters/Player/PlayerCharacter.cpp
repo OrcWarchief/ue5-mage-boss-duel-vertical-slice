@@ -322,11 +322,40 @@ void APlayerCharacter::StartChargedAttack(const FInputActionValue& Value)
 	}
 
 	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	
+	UAnimMontage* Montage = ChargedAttackMontage.Get();
 
 	if (!AnimInstance || !ChargedAttackMontage)
 	{
 		return;
 	}
+
+	if (!Montage->IsValidSectionName(ChargedAttackStartSection) ||
+		!Montage->IsValidSectionName(ChargedAttackLoopSection) ||
+		!Montage->IsValidSectionName(ChargedAttackReleaseSection))
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT(
+				"[ChargedAttack] Invalid montage section. "
+				"Start='%s', Loop='%s', Release='%s'"
+			),
+			*ChargedAttackStartSection.ToString(),
+			*ChargedAttackLoopSection.ToString(),
+			*ChargedAttackReleaseSection.ToString()
+		);
+
+		return;
+	}
+
+	const float PlayedLength = AnimInstance->Montage_Play(ChargedAttackMontage, 1.0f);
+
+	if (PlayedLength <= 0.0f)
+	{
+		return;
+	}
+
 	bIsChargingAttack = true;
 	bChargedAttackReleasePending = false;
 	bChargedAttackReleaseResolved = false;
@@ -337,15 +366,11 @@ void APlayerCharacter::StartChargedAttack(const FInputActionValue& Value)
 
 	ApplyChargedAttackMovementRestriction();
 
-	const float PlayedLength = AnimInstance->Montage_Play(ChargedAttackMontage, 1.0f);
+	AnimInstance->Montage_SetNextSection(ChargedAttackStartSection, ChargedAttackLoopSection, Montage);
 
-	if (PlayedLength <= 0.0f)
-	{
-		CancelChargedAttackInternal();
-		return;
-	}
+	AnimInstance->Montage_SetNextSection(ChargedAttackLoopSection, ChargedAttackLoopSection, Montage);
 
-	AnimInstance->Montage_JumpToSection(ChargedAttackStartSection, ChargedAttackMontage);
+	AnimInstance->Montage_JumpToSection(ChargedAttackStartSection, Montage);
 
 	FOnMontageEnded EndDelegate;
 	EndDelegate.BindUObject(this, &APlayerCharacter::OnChargedAttackMontageEnded);
@@ -393,6 +418,11 @@ void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
 {
 	if (!bIsChargingAttack)
 	{
+		if (!bChargedAttackReleasePending)
+		{
+			CancelChargedAttackInternal();
+		}
+
 		return;
 	}
 
@@ -403,8 +433,6 @@ void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
 	);
 
 	const bool bEnoughCharge = CurrentChargedAttackTime >= MinChargedAttackTime;
-
-	bIsChargingAttack = false;
 
 	if (!bEnoughCharge)
 	{
@@ -437,6 +465,11 @@ void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
 
 void APlayerCharacter::CancelChargedAttack(const FInputActionValue& Value)
 {
+	if (bChargedAttackReleasePending)
+	{
+		return;
+	}
+
 	CancelChargedAttackInternal();
 }
 
@@ -450,6 +483,14 @@ bool APlayerCharacter::CanStartChargedAttack() const
 	if (bIsChargingAttack || bChargedAttackReleasePending)
 	{
 		return false;
+	}
+
+	if (const UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+	{
+		if (ChargedAttackMontage && AnimInstance->Montage_IsActive(ChargedAttackMontage))
+		{
+			return false;
+		}
 	}
 
 	if (IsDodging())
@@ -480,23 +521,35 @@ bool APlayerCharacter::CanStartChargedAttack() const
 
 void APlayerCharacter::CancelChargedAttackInternal()
 {
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+
+	UAnimMontage* Montage = ChargedAttackMontage.Get();
+
+	const bool bMontageActive = 
+		AnimInstance && 
+		Montage && 
+		AnimInstance->Montage_IsActive(Montage);
+
 	const bool bWasCharging = bIsChargingAttack;
 	const bool bWasReleasing = bChargedAttackReleasePending;
 
-	if (!bWasCharging && !bWasReleasing)
+	if (!bWasCharging &&
+		!bWasReleasing &&
+		!bMontageActive)
 	{
 		return;
 	}
 
-	const float ChargeRatio = bWasCharging
-		? FMath::Clamp(
-			CurrentChargedAttackTime / MaxChargedAttackTime,
-			0.0f,
-			1.0f
-		)
-		: PendingChargedAttackRatio;
+	const float SafeMaxChargeTime = FMath::Max(MaxChargedAttackTime, KINDA_SMALL_NUMBER);
 
-	if (bWasCharging || (bWasReleasing && !bChargedAttackReleaseResolved))
+	const float ChargeRatio = bWasCharging ? FMath::Clamp(CurrentChargedAttackTime / SafeMaxChargeTime, 0.0f, 1.0f) : PendingChargedAttackRatio;
+
+	const bool bNeedsEndEvent =
+		bWasCharging ||
+		(bWasReleasing && !bChargedAttackReleaseResolved) ||
+		(!bWasCharging && !bWasReleasing && bMontageActive);
+
+	if (bNeedsEndEvent)
 	{
 		OnChargedAttackEnded(false, ChargeRatio);
 	}
@@ -511,12 +564,9 @@ void APlayerCharacter::CancelChargedAttackInternal()
 
 	RestoreChargedAttackMovement();
 
-	if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+	if (bMontageActive)
 	{
-		if (ChargedAttackMontage && AnimInstance->Montage_IsPlaying(ChargedAttackMontage))
-		{
-			AnimInstance->Montage_Stop(0.1f, ChargedAttackMontage);
-		}
+		AnimInstance->Montage_Stop(0.05f, Montage);
 	}
 }
 
@@ -594,15 +644,43 @@ void APlayerCharacter::OnChargedAttackMontageEnded(UAnimMontage* Montage, bool b
 		return;
 	}
 
-	if (bChargedAttackReleasePending && !bChargedAttackReleaseResolved)
+	const bool bSequenceWasActive = bIsChargingAttack || bChargedAttackReleasePending;
+
+	if (!bSequenceWasActive)
 	{
+		return;
+	}
+
+	if (!bChargedAttackReleaseResolved)
+	{
+		const float SafeMaxChargeTime =
+			FMath::Max(
+				MaxChargedAttackTime,
+				KINDA_SMALL_NUMBER
+			);
+
+		const float ChargeRatio =
+			bIsChargingAttack && MaxChargedAttackTime > 0.0f
+			? FMath::Clamp(
+				CurrentChargedAttackTime / SafeMaxChargeTime,
+				0.0f,
+				1.0f
+			)
+			: PendingChargedAttackRatio;x
 		UE_LOG(
 			LogTemp,
 			Warning,
-			TEXT("[ChargedAttack] Release montage ended without Fire Charged Attack Notify.")
+			TEXT(
+				"[ChargedAttack] Montage ended before release resolved. "
+				"Interrupted=%s, Charging=%s, Pending=%s"
+			),
+			bInterrupted ? TEXT("true") : TEXT("false"),
+			bIsChargingAttack ? TEXT("true") : TEXT("false"),
+			bChargedAttackReleasePending ? TEXT("true") : TEXT("false")
 		);
 
-		OnChargedAttackEnded(false, PendingChargedAttackRatio);
+		// Blueprint VFX와 오디오 정리
+		OnChargedAttackEnded(false, ChargeRatio);
 	}
 
 	FinishChargedAttackSequence();
