@@ -86,6 +86,32 @@ void APlayerCharacter::Tick(float DeltaTime)
 	{
 		DrawChargedShotDebug();
 	}
+
+	const UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+
+	if (GEngine && MoveComp)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			4242,
+			0.0f,
+			FColor::Yellow,
+			FString::Printf(
+				TEXT(
+					"Class=%s | Charge=%d | Release=%d | "
+					"MaxWalk=%.1f | GetMax=%.1f | Vel=%.1f | "
+					"Saved=%.1f | Mode=%d"
+				),
+				*GetClass()->GetName(),
+				bIsChargingAttack ? 1 : 0,
+				bChargedAttackReleasePending ? 1 : 0,
+				MoveComp->MaxWalkSpeed,
+				MoveComp->GetMaxSpeed(),
+				GetVelocity().Size2D(),
+				SavedChargedAttackMaxWalkSpeed,
+				static_cast<int32>(MoveComp->MovementMode)
+			)
+		);
+	}
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -666,18 +692,7 @@ void APlayerCharacter::OnChargedAttackMontageEnded(UAnimMontage* Montage, bool b
 				0.0f,
 				1.0f
 			)
-			: PendingChargedAttackRatio;x
-		UE_LOG(
-			LogTemp,
-			Warning,
-			TEXT(
-				"[ChargedAttack] Montage ended before release resolved. "
-				"Interrupted=%s, Charging=%s, Pending=%s"
-			),
-			bInterrupted ? TEXT("true") : TEXT("false"),
-			bIsChargingAttack ? TEXT("true") : TEXT("false"),
-			bChargedAttackReleasePending ? TEXT("true") : TEXT("false")
-		);
+			: PendingChargedAttackRatio;
 
 		// Blueprint VFX와 오디오 정리
 		OnChargedAttackEnded(false, ChargeRatio);
@@ -695,13 +710,11 @@ bool APlayerCharacter::FireChargedAttack(float ChargeRatio)
 
 	if (!ChargedAttackProjectileClass)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack] ChargedAttackProjectileClass is not set."));
 		return false;
 	}
 
 	if (GetCurrentMana() < ChargedAttackManaCost)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack] Not enough mana to fire charged attack."));
 		return false;
 	}
 
@@ -728,7 +741,6 @@ bool APlayerCharacter::FireChargedAttack(float ChargeRatio)
 
 	if (!Projectile)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[ChargedAttack] Failed to spawn projectile."));
 		return false;
 	}
 

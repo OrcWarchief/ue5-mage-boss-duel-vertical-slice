@@ -66,6 +66,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat|Charged Attack|AnimNotify")
 	void PerformChargedAttackRelease();
 
+	UFUNCTION(BlueprintPure, Category = "Combat|Charged Attack|Movement")
+	bool IsChargedAttackMovementOverrideActive() const
+	{
+		return bIsChargingAttack || bChargedAttackReleasePending;
+	}
+
 protected:
 	virtual void BeginPlay() override;
 
