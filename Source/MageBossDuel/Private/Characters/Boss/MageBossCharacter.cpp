@@ -12,9 +12,25 @@
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
+#include "DrawDebugHelpers.h"
+
 AMageBossCharacter::AMageBossCharacter()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
+
+	// deb
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = false;
+	bUseControllerRotationRoll = false;
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->bOrientRotationToMovement = false;
+		MoveComp->bUseControllerDesiredRotation = false;
+	}
+
+	// debug
 
 	if (USkeletalMeshComponent* MeshComp = GetMesh())
 	{
@@ -600,10 +616,7 @@ void AMageBossCharacter::StartBossBrain()
 		true
 	);
 
-	if (bEnableBossBrainDebug)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[BossBrain] Started"));
-	}
+	SetActorTickEnabled(true);
 }
 
 void AMageBossCharacter::StopBossBrain()
@@ -613,10 +626,7 @@ void AMageBossCharacter::StopBossBrain()
 		World->GetTimerManager().ClearTimer(BossBrainTimerHandle);
 	}
 
-	if (bEnableBossBrainDebug)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[BossBrain] Stopped"));
-	}
+	SetActorTickEnabled(false);
 }
 
 bool AMageBossCharacter::TrySelectAndStartBossSkill()
@@ -757,7 +767,10 @@ void AMageBossCharacter::FinishBossPhaseTransition()
 	OnBossPhaseChanged(CurrentBossPhase);
 	OnBossPhaseTransitionFinished(CurrentBossPhase);
 
-	if (bAutoStartBossBrain && IsAlive())
+	const bool bShouldResumeBossBrain = bResumeBossBrainAfterPhaseTransition;
+	bResumeBossBrainAfterPhaseTransition = false;
+
+	if (bShouldResumeBossBrain && IsAlive() && !IsBossBrainRunning())
 	{
 		StartBossBrain();
 	}
@@ -776,6 +789,46 @@ void AMageBossCharacter::BeginPlay()
 	{
 		StartBossBrain();
 	}
+}
+
+void AMageBossCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	const ECharacterState State = GetCurrentState();
+
+	const bool bCanFaceTarget =
+		IsAlive() &&
+		IsValid(CurrentCombatTarget.Get()) &&
+		!IsTeleporting() &&
+		!IsPhaseTransitioning() &&
+		(
+			bLocomotionOnlyDebug ||
+			!IsAnyBossSkillActive()
+			) &&
+		(
+			State == ECharacterState::Idle ||
+			State == ECharacterState::Moving
+			);
+
+	if (bCanFaceTarget)
+	{
+		FaceCombatTargetSmoothly(DeltaTime);
+	}
+
+	if (bDrawComfortDistanceDebug)
+	{
+		float DistanceToTarget = 0.0f;
+		const FVector DirectionToTarget =
+			GetFlatDirectionToCombatTarget(DistanceToTarget);
+
+		if (!DirectionToTarget.IsNearlyZero())
+		{
+			DrawComfortDistanceDebug(DistanceToTarget);
+		}
+	}
+
+	UpdateBossOrbitMovement(DeltaTime);
 }
 
 bool AMageBossCharacter::IsLockOnActive() const
@@ -982,6 +1035,7 @@ void AMageBossCharacter::Die_Implementation()
 	}
 
 	bIsPhaseTransitioning = false;
+	bResumeBossBrainAfterPhaseTransition = false;
 	ActivePhaseTransitionMontage = nullptr;
 	SetInvulnerable(false);
 
@@ -1365,17 +1419,13 @@ bool AMageBossCharacter::FindTeleportDestination(
 	EDodgeDirection& OutResolvedDirection
 ) const
 {
-	const UWorld* World = GetWorld();
-	const UCapsuleComponent* Capsule = GetCapsuleComponent();
-
-	if (!World || !Capsule)
+	// 1. 거리 재배치 상황에서는 플레이어 기준 목적지를 우선 사용
+	if (FindTargetRelativeRepositionDestination(OutLocation, OutResolvedDirection))
 	{
-		return false;
+		return true;
 	}
 
-	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
-	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
-
+	// 2. 실패하면 기존 방식으로 fallback
 	TArray<EDodgeDirection> DirectionOrder;
 	DirectionOrder.Reserve(9);
 
@@ -1414,72 +1464,252 @@ bool AMageBossCharacter::FindTeleportDestination(
 			const FVector RawCandidate =
 				GetActorLocation() + DirectionWorld * CandidateDistance;
 
-			const FVector TraceStart =
-				RawCandidate + FVector::UpVector * TeleportGroundTraceUp;
-
-			const FVector TraceEnd =
-				RawCandidate - FVector::UpVector * TeleportGroundTraceDown;
-
-			FHitResult GroundHit;
-			FCollisionQueryParams GroundQueryParams(
-				FName(TEXT("BossTeleportGroundTrace")),
-				false,
-				this
-			);
-
-			const bool bGroundHit = World->LineTraceSingleByChannel(
-				GroundHit,
-				TraceStart,
-				TraceEnd,
-				TeleportGroundTraceChannel.GetValue(),
-				GroundQueryParams
-			);
-
-			if (!bGroundHit)
+			FVector CandidateLocation = FVector::ZeroVector;
+			if (!ResolveTeleportCandidateLocation(RawCandidate, CandidateLocation))
 			{
 				continue;
 			}
 
-			if (GroundHit.ImpactNormal.Z < TeleportMinGroundNormalZ)
-			{
-				continue;
-			}
-
-			const FVector CapsuleLocation =
-				GroundHit.ImpactPoint +
-				FVector(0.0f, 0.0f, CapsuleHalfHeight + TeleportGroundOffset);
-
-			const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(
-				FMath::Max(1.0f, CapsuleRadius - 2.0f),
-				FMath::Max(1.0f, CapsuleHalfHeight - 2.0f)
-			);
-
-			FCollisionQueryParams OverlapQueryParams(
-				FName(TEXT("BossTeleportOverlap")),
-				false,
-				this
-			);
-
-			const bool bBlocked = World->OverlapBlockingTestByChannel(
-				CapsuleLocation,
-				FQuat::Identity,
-				TeleportOverlapChannel.GetValue(),
-				CapsuleShape,
-				OverlapQueryParams
-			);
-
-			if (bBlocked)
-			{
-				continue;
-			}
-
-			OutLocation = CapsuleLocation;
+			OutLocation = CandidateLocation;
 			OutResolvedDirection = CandidateDirection;
 			return true;
 		}
 	}
 
 	return false;
+}
+
+bool AMageBossCharacter::FindTargetRelativeRepositionDestination(FVector& OutLocation, EDodgeDirection& OutResolvedDirection) const
+{
+	const AActor* Target = CurrentCombatTarget.Get();
+	if (!IsValid(Target))
+	{
+		return false;
+	}
+
+	const FVector BossLocation = GetActorLocation();
+	const FVector TargetLocation = Target->GetActorLocation();
+
+	const float DistanceToTarget = FVector::Dist2D(BossLocation, TargetLocation);
+	if (!ShouldRepositionWithTeleport(DistanceToTarget))
+	{
+		return false;
+	}
+
+	FVector FromTargetToBoss = BossLocation - TargetLocation;
+	FromTargetToBoss.Z = 0.0f;
+
+	if (FromTargetToBoss.IsNearlyZero())
+	{
+		FromTargetToBoss = -Target->GetActorForwardVector();
+		FromTargetToBoss.Z = 0.0f;
+	}
+
+	if (!FromTargetToBoss.Normalize())
+	{
+		return false;
+	}
+
+	const float NearDistance = FMath::Max(0.0f, TeleportNearDistance);
+	const float FarDistance = FMath::Max(NearDistance + 1.0f, TeleportFarDistance);
+
+	const float MinDesiredDistance = FMath::Max(
+		TeleportMinDistance,
+		NearDistance + 100.0f
+	);
+
+	const float MaxDesiredDistance = FMath::Max(
+		MinDesiredDistance,
+		FarDistance - 100.0f
+	);
+
+	const float DesiredDistance = FMath::Clamp(
+		RepositionDesiredDistance + FMath::FRandRange(-RepositionDistanceJitter, RepositionDistanceJitter),
+		MinDesiredDistance,
+		MaxDesiredDistance
+	);
+
+	const TArray<float> AngleOffsets =
+	{
+		0.0f,
+		45.0f,
+		-45.0f,
+		90.0f,
+		-90.0f,
+		135.0f,
+		-135.0f,
+		180.0f
+	};
+
+	for (const float AngleOffset : AngleOffsets)
+	{
+		FVector CandidateDirection =
+			FromTargetToBoss.RotateAngleAxis(AngleOffset, FVector::UpVector);
+
+		CandidateDirection.Z = 0.0f;
+
+		if (!CandidateDirection.Normalize())
+		{
+			continue;
+		}
+
+		const FVector RawCandidate =
+			TargetLocation + CandidateDirection * DesiredDistance;
+
+		FVector CandidateLocation = FVector::ZeroVector;
+		if (!ResolveTeleportCandidateLocation(RawCandidate, CandidateLocation))
+		{
+			continue;
+		}
+
+		const FVector MoveDirection = CandidateLocation - BossLocation;
+		OutResolvedDirection = ResolveTeleportDirectionFromWorldMove(MoveDirection);
+
+		if (OutResolvedDirection == EDodgeDirection::None)
+		{
+			OutResolvedDirection = ChooseTeleportDirectionForAI();
+		}
+
+		OutLocation = CandidateLocation;
+		return true;
+	}
+
+	return false;
+}
+
+bool AMageBossCharacter::ResolveTeleportCandidateLocation(const FVector& RawCandidate, FVector& OutLocation) const
+{
+	const UWorld* World = GetWorld();
+	const UCapsuleComponent* Capsule = GetCapsuleComponent();
+
+	if (!World || !Capsule)
+	{
+		return false;
+	}
+
+	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+
+	const FVector TraceStart =
+		RawCandidate + FVector::UpVector * TeleportGroundTraceUp;
+
+	const FVector TraceEnd =
+		RawCandidate - FVector::UpVector * TeleportGroundTraceDown;
+
+	FHitResult GroundHit;
+	FCollisionQueryParams GroundQueryParams(
+		FName(TEXT("BossTeleportGroundTrace")),
+		false,
+		this
+	);
+
+	const bool bGroundHit = World->LineTraceSingleByChannel(
+		GroundHit,
+		TraceStart,
+		TraceEnd,
+		TeleportGroundTraceChannel.GetValue(),
+		GroundQueryParams
+	);
+
+	if (!bGroundHit)
+	{
+		return false;
+	}
+
+	if (GroundHit.ImpactNormal.Z < TeleportMinGroundNormalZ)
+	{
+		return false;
+	}
+
+	const FVector CapsuleLocation =
+		GroundHit.ImpactPoint +
+		FVector(0.0f, 0.0f, CapsuleHalfHeight + TeleportGroundOffset);
+
+	const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(
+		FMath::Max(1.0f, CapsuleRadius - 2.0f),
+		FMath::Max(1.0f, CapsuleHalfHeight - 2.0f)
+	);
+
+	FCollisionQueryParams OverlapQueryParams(
+		FName(TEXT("BossTeleportOverlap")),
+		false,
+		this
+	);
+
+	const bool bBlocked = World->OverlapBlockingTestByChannel(
+		CapsuleLocation,
+		FQuat::Identity,
+		TeleportOverlapChannel.GetValue(),
+		CapsuleShape,
+		OverlapQueryParams
+	);
+
+	if (bBlocked)
+	{
+		return false;
+	}
+
+	OutLocation = CapsuleLocation;
+	return true;
+}
+
+EDodgeDirection AMageBossCharacter::ResolveTeleportDirectionFromWorldMove(const FVector& WorldMoveDirection) const
+{
+	FVector MoveDirection = WorldMoveDirection;
+	MoveDirection.Z = 0.0f;
+
+	if (!MoveDirection.Normalize())
+	{
+		return EDodgeDirection::None;
+	}
+
+	FVector Forward = GetLockOnBasisForward();
+	Forward.Z = 0.0f;
+	Forward.Normalize();
+
+	FVector Right = GetLockOnBasisRight();
+	Right.Z = 0.0f;
+	Right.Normalize();
+
+	const float ForwardDot = FVector::DotProduct(MoveDirection, Forward);
+	const float RightDot = FVector::DotProduct(MoveDirection, Right);
+
+	constexpr float ForwardThreshold = 0.5f;
+	constexpr float SideThreshold = 0.35f;
+
+	if (ForwardDot > ForwardThreshold)
+	{
+		if (RightDot > SideThreshold)
+		{
+			return EDodgeDirection::ForwardRight;
+		}
+
+		if (RightDot < -SideThreshold)
+		{
+			return EDodgeDirection::ForwardLeft;
+		}
+
+		return EDodgeDirection::Forward;
+	}
+
+	if (ForwardDot < -ForwardThreshold)
+	{
+		if (RightDot > SideThreshold)
+		{
+			return EDodgeDirection::BackwardRight;
+		}
+
+		if (RightDot < -SideThreshold)
+		{
+			return EDodgeDirection::BackwardLeft;
+		}
+
+		return EDodgeDirection::Backward;
+	}
+
+	return RightDot >= 0.0f
+		? EDodgeDirection::Right
+		: EDodgeDirection::Left;
 }
 
 FVector AMageBossCharacter::TeleportDirectionToWorld(EDodgeDirection Direction) const
@@ -1895,12 +2125,23 @@ void AMageBossCharacter::BossBrainThink()
 		return;
 	}
 
+	// debug
+	if (bLocomotionOnlyDebug)
+	{
+		return;
+	}
+
 	if (IsAnyBossSkillActive())
 	{
 		return;
 	}
 
 	if (TryStartPendingPhaseTransition())
+	{
+		return;
+	}
+
+	if (TryStartRepositionTeleport())
 	{
 		return;
 	}
@@ -1958,6 +2199,28 @@ bool AMageBossCharacter::BuildBossSkillCandidates(TArray<FBossSkillOption>& OutC
 		}
 	}
 
+	if (OutCandidates.Num() <= 1)
+	{
+		return OutCandidates.Num() > 0;
+	}
+
+	const bool bHasAlternativeToLastSkill = OutCandidates.ContainsByPredicate(
+		[this](const FBossSkillOption& Option)
+		{
+			return Option.bAllowRepeat || Option.SkillType != LastStartedBossSkill;
+		}
+	);
+
+	if (bHasAlternativeToLastSkill)
+	{
+		OutCandidates.RemoveAll(
+			[this](const FBossSkillOption& Option)
+			{
+				return !Option.bAllowRepeat && Option.SkillType == LastStartedBossSkill;
+			}
+		);
+	}
+
 	return OutCandidates.Num() > 0;
 }
 
@@ -1969,6 +2232,11 @@ bool AMageBossCharacter::IsBossSkillOptionAllowed(const FBossSkillOption& Option
 	}
 
 	if (Option.SkillType == EBossSkillType::None)
+	{
+		return false;
+	}
+
+	if (Option.SkillType == EBossSkillType::Teleport && !bAllowTeleportAsWeightedSkill)
 	{
 		return false;
 	}
@@ -1997,11 +2265,6 @@ bool AMageBossCharacter::IsBossSkillOptionAllowed(const FBossSkillOption& Option
 
 	if (HealthPercent < Option.MinHealthPercent ||
 		HealthPercent > Option.MaxHealthPercent)
-	{
-		return false;
-	}
-
-	if (!Option.bAllowRepeat && Option.SkillType == LastStartedBossSkill)
 	{
 		return false;
 	}
@@ -2093,16 +2356,6 @@ bool AMageBossCharacter::TryStartBossSkill(EBossSkillType SkillType)
 		if (UWorld* World = GetWorld())
 		{
 			LastBossSkillStartTime = World->GetTimeSeconds();
-		}
-
-		if (bEnableBossBrainDebug)
-		{
-			UE_LOG(
-				LogTemp,
-				Warning,
-				TEXT("[BossBrain] Started skill: %s"),
-				*UEnum::GetValueAsString(SkillType)
-			);
 		}
 	}
 
@@ -2215,6 +2468,213 @@ void AMageBossCharacter::InitializeDefaultBossSkillOptions()
 	}
 }
 
+void AMageBossCharacter::UpdateBossOrbitMovement(float DeltaTime)
+{
+	float DistanceToTarget = 0.0f;
+	if (!CanUpdateBossOrbitMovement(DistanceToTarget))
+	{
+		return;
+	}
+
+	UpdateOrbitDirectionIfNeeded();
+
+	float UnusedDistance = 0.0f;
+	const FVector DirectionToTarget =
+		GetFlatDirectionToCombatTarget(UnusedDistance);
+
+	if (DirectionToTarget.IsNearlyZero())
+	{
+		return;
+	}
+
+	FVector OrbitDirection =
+		FVector::CrossProduct(DirectionToTarget, FVector::UpVector).GetSafeNormal();
+
+	OrbitDirection.Z = 0.0f;
+
+	if (!OrbitDirection.Normalize())
+	{
+		return;
+	}
+
+	OrbitDirection *= static_cast<float>(OrbitDirectionSign);
+
+	AddMovementInput(OrbitDirection, OrbitInputScale);
+
+	if (GetCurrentState() == ECharacterState::Idle)
+	{
+		SetCharacterState(ECharacterState::Moving);
+	}
+}
+
+bool AMageBossCharacter::CanUpdateBossOrbitMovement(float& OutDistanceToTarget) const
+{
+	OutDistanceToTarget = 0.0f;
+
+	if (!bEnableBossOrbitMovement)
+	{
+		return false;
+	}
+
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	if (!IsBossBrainRunning())
+	{
+		return false;
+	}
+
+	if (!IsValid(CurrentCombatTarget.Get()))
+	{
+	return false;
+	}
+
+	if (IsPhaseTransitioning())
+	{
+		return false;
+	}
+
+	if (IsTeleporting())
+	{
+		return false;
+	}
+
+	if (IsAnyBossSkillActive())
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State != ECharacterState::Idle && State != ECharacterState::Moving)
+	{
+		return false;
+	}
+
+	const UCharacterMovementComponent * MoveComp = GetCharacterMovement();
+	if (!MoveComp || !MoveComp->IsMovingOnGround())
+	{
+		return false;
+	}
+
+	const FVector DirectionToTarget = GetFlatDirectionToCombatTarget(OutDistanceToTarget);
+	if (DirectionToTarget.IsNearlyZero())
+	{
+		return false;
+	}
+
+	if (bLocomotionOnlyDebug)
+	{
+		return true;
+	}
+
+	return OutDistanceToTarget >= TeleportNearDistance && 
+		OutDistanceToTarget <= TeleportFarDistance;
+}
+
+bool AMageBossCharacter::TryStartRepositionTeleport()
+{
+	if (!bEnableRepositionTeleport)
+	{
+		return false;
+	}
+
+	if (bBlockOtherSkillsDuringRunePrisonPattern && IsRunePrisonPatternActive())
+	{
+		return false;
+	}
+
+	float DistanceToTarget = 0.0f;
+	const FVector DirectionToTarget = GetFlatDirectionToCombatTarget(DistanceToTarget);
+	if (DirectionToTarget.IsNearlyZero())
+	{
+		return false;
+	}
+
+	if (!ShouldRepositionWithTeleport(DistanceToTarget))
+	{
+		return false;
+	}
+
+	return TryStartBossSkill(EBossSkillType::Teleport);
+}
+
+bool AMageBossCharacter::ShouldRepositionWithTeleport(float DistanceToTarget) const
+{
+	if (!bEnableRepositionTeleport)
+	{
+		return false;
+	}
+
+	const float NearDistance = FMath::Max(0.0f, TeleportNearDistance);
+	const float FarDistance  = FMath::Max(NearDistance, TeleportFarDistance);
+
+	return DistanceToTarget <= NearDistance || DistanceToTarget >= FarDistance;
+}
+
+FVector AMageBossCharacter::GetFlatDirectionToCombatTarget(float& OutDistance) const
+{
+	OutDistance = 0.0f;
+
+	const AActor* Target = CurrentCombatTarget.Get();
+	if (!IsValid(Target))
+	{
+		return FVector::ZeroVector;
+	}
+
+	FVector ToTarget = Target->GetActorLocation() - GetActorLocation();
+	ToTarget.Z = 0.0f;
+
+	OutDistance = ToTarget.Size();
+	if (OutDistance <= KINDA_SMALL_NUMBER)
+	{
+		return FVector::ZeroVector;
+	}
+
+	return ToTarget / OutDistance;
+}
+
+void AMageBossCharacter::FaceCombatTargetSmoothly(float DeltaTime)
+{
+	float DistanceToTarget = 0.0f;
+	const FVector DirectionToTarget = GetFlatDirectionToCombatTarget(DistanceToTarget);
+	if (DirectionToTarget.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FRotator DesiredRotation = DirectionToTarget.Rotation();
+	const FRotator CurrentRotation = GetActorRotation();
+
+	const FRotator NewRotation = FMath::RInterpTo(
+		CurrentRotation,
+		FRotator(0.0f, DesiredRotation.Yaw, 0.0f),
+		DeltaTime,
+		BossFacingInterpSpeed
+	);
+
+	SetActorRotation(NewRotation);
+}
+
+void AMageBossCharacter::UpdateOrbitDirectionIfNeeded()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+	if ((Now - LastOrbitDirectionChangeTime) < OrbitDirectionChangeInterval)
+	{
+		return;
+	}
+
+	LastOrbitDirectionChangeTime = Now;
+	OrbitDirectionSign = FMath::RandBool() ? 1 : -1;
+}
+
 EBossPhase AMageBossCharacter::GetDesiredBossPhaseFromHealth() const
 {
 	const float HP = GetHealthPercent();
@@ -2271,6 +2731,7 @@ void AMageBossCharacter::BeginBossPhaseTransition(EBossPhase TargetPhase)
 	bIsPhaseTransitioning = true;
 	PendingBossPhase = TargetPhase;
 	ActivePhaseTransitionMontage = GetPhaseTransitionMontage(TargetPhase);
+	bResumeBossBrainAfterPhaseTransition = IsBossBrainRunning();
 
 	if (bStopBrainDuringPhaseTransition)
 	{
@@ -2371,4 +2832,122 @@ void AMageBossCharacter::ApplyBossPhaseTuning(EBossPhase NewPhase)
 	default:
 		break;
 	}
+}
+
+void AMageBossCharacter::DrawComfortDistanceDebug(float DistanceToTarget) const
+{
+	if (!bDrawComfortDistanceDebug)
+	{
+		return;
+	}
+
+	const AActor* Target = CurrentCombatTarget.Get();
+	const UWorld* World = GetWorld();
+
+	if (!World || !IsValid(Target))
+	{
+		return;
+	}
+
+	const float DebugZ = GetActorLocation().Z + ComfortDistanceDebugHeight;
+
+	const FVector TargetCenter = FVector(
+		Target->GetActorLocation().X,
+		Target->GetActorLocation().Y,
+		DebugZ
+	);
+
+	const FVector BossPoint = FVector(
+		GetActorLocation().X,
+		GetActorLocation().Y,
+		DebugZ
+	);
+
+	const int32 Segments = FMath::Max(8, ComfortDistanceDebugSegments);
+
+	auto DrawGroundCircle =
+		[World, Segments](const FVector& Center, float Radius, const FColor& Color)
+		{
+			if (Radius <= 0.0f)
+			{
+				return;
+			}
+
+			FVector PrevPoint =
+				Center + FVector(Radius, 0.0f, 0.0f);
+
+			for (int32 Index = 1; Index <= Segments; ++Index)
+			{
+				const float Angle =
+					2.0f * PI * static_cast<float>(Index) / static_cast<float>(Segments);
+
+				const FVector NextPoint =
+					Center +
+					FVector(
+						FMath::Cos(Angle) * Radius,
+						FMath::Sin(Angle) * Radius,
+						0.0f
+					);
+
+				DrawDebugLine(
+					World,
+					PrevPoint,
+					NextPoint,
+					Color,
+					false,
+					0.0f,
+					0,
+					2.0f
+				);
+
+				PrevPoint = NextPoint;
+			}
+		};
+
+	// 안쪽 원: 너무 가까운 거리
+	DrawGroundCircle(TargetCenter, TeleportNearDistance, FColor::Red);
+
+	// 바깥 원: 너무 먼 거리
+	DrawGroundCircle(TargetCenter, TeleportFarDistance, FColor::Green);
+
+	// 보스와 타겟 사이 거리선
+	DrawDebugLine(
+		World,
+		TargetCenter,
+		BossPoint,
+		FColor::Cyan,
+		false,
+		0.0f,
+		0,
+		2.0f
+	);
+
+	const TCHAR* ZoneText = TEXT("Comfort");
+
+	if (DistanceToTarget < TeleportNearDistance)
+	{
+		ZoneText = TEXT("Too Close");
+	}
+	else if (DistanceToTarget > TeleportFarDistance)
+	{
+		ZoneText = TEXT("Too Far");
+	}
+
+	const FString DebugText = FString::Printf(
+		TEXT("Dist: %.0f / Comfort: %.0f - %.0f / %s"),
+		DistanceToTarget,
+		TeleportNearDistance,
+		TeleportFarDistance,
+		ZoneText
+	);
+
+	DrawDebugString(
+		World,
+		BossPoint + FVector(0.0f, 0.0f, 120.0f),
+		DebugText,
+		nullptr,
+		FColor::White,
+		0.0f,
+		true
+	);
 }

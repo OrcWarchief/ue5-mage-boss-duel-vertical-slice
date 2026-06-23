@@ -124,6 +124,39 @@ class MAGEBOSSDUEL_API AMageBossCharacter : public ABaseCharacter
 public:
 	AMageBossCharacter();
 
+	virtual void Tick(float DeltaTime) override;
+
+	// ===== Boss Orbit Movement Tuning =====
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement")
+	bool bEnableBossOrbitMovement = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float OrbitInputScale = 0.35f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "deg/s"))
+	float BossFacingInterpSpeed = 8.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement", meta = (ClampMin = "0.1", UIMin = "0.1", Units = "s"))
+	float OrbitDirectionChangeInterval = 2.5f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI|Movement")
+	bool bEnableRepositionTeleport = true;
+
+	// ===== Boss Debug =====
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BossAI|Debug")
+	bool bLocomotionOnlyDebug = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BossAI|Debug")
+	bool bDrawComfortDistanceDebug = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BossAI|Debug", meta = (ClampMin = "8", UIMin = "8"))
+	int32 ComfortDistanceDebugSegments = 96;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BossAI|Debug", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float ComfortDistanceDebugHeight = 8.0f;
+
 	// ===== Target =====
 
 	UFUNCTION(BlueprintCallable, Category = "Boss|Target")
@@ -296,6 +329,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|AI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float TeleportFarDistance = 900.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|AI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float RepositionDesiredDistance = 700.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport|AI", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float RepositionDistanceJitter = 100.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Skill|Teleport")
 	bool bFaceTargetOnTeleportStart = true;
 
@@ -432,6 +471,9 @@ protected:
 	bool bAllowBasicAttackFallback = true;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
+	bool bAllowTeleportAsWeightedSkill = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
 	bool bBlockOtherSkillsDuringRunePrisonPattern = true;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BossAI")
@@ -447,6 +489,12 @@ protected:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Runtime")
 	float LastBossSkillStartTime = -9999.0f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Movement|Runtime")
+	int32 OrbitDirectionSign = 1;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BossAI|Movement|Runtime")
+	float LastOrbitDirectionChangeTime = -9999.0f;
 
 	// ===== Boss Phase Tuning =====
 
@@ -534,6 +582,20 @@ private:
 		EDodgeDirection& OutResolvedDirection
 	) const;
 
+	bool FindTargetRelativeRepositionDestination(
+		FVector& OutLocation,
+		EDodgeDirection& OutResolvedDirection
+	) const;
+
+	bool ResolveTeleportCandidateLocation(
+		const FVector& RawCandidate,
+		FVector& OutLocation
+	) const;
+
+	EDodgeDirection ResolveTeleportDirectionFromWorldMove(
+		const FVector& WorldMoveDirection
+	) const;
+
 	FVector TeleportDirectionToWorld(EDodgeDirection Direction) const;
 	FRotator MakeFacingRotationAtLocation(const FVector& WorldLocation) const;
 
@@ -603,9 +665,28 @@ private:
 
 	void InitializeDefaultBossSkillOptions();
 
+	// ===== Boss Orbit Movement =====
+
+	void UpdateBossOrbitMovement(float DeltaTime);
+
+	bool CanUpdateBossOrbitMovement(float& OutDistanceToTarget) const;
+
+	bool TryStartRepositionTeleport();
+
+	bool ShouldRepositionWithTeleport(float DistanceToTarget) const;
+
+	FVector GetFlatDirectionToCombatTarget(float& OutDistance) const;
+
+	void FaceCombatTargetSmoothly(float DeltaTime);
+
+	void UpdateOrbitDirectionIfNeeded();
+
 	// ===== Boss Phase	=====
 	UPROPERTY(Transient)
 	bool bIsPhaseTransitioning = false;
+
+	UPROPERTY(Transient)
+	bool bResumeBossBrainAfterPhaseTransition = false;
 
 	UPROPERTY(Transient)
 	EBossPhase PendingBossPhase = EBossPhase::Phase1;
@@ -626,4 +707,6 @@ private:
 	void OnPhaseTransitionMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	void ApplyBossPhaseTuning(EBossPhase NewPhase);
+
+	void DrawComfortDistanceDebug(float DistanceToTarget) const;
 };

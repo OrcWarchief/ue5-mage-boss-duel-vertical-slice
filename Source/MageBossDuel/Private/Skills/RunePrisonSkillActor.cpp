@@ -101,32 +101,6 @@ void ARunePrisonSkillActor::InitializePrison(ABaseCharacter* InDamageCauser, AAc
 
 	OnPrisonTelegraphStarted(AnchorLocations, OpenGapIndex, TelegraphDuration);
 
-	if (bDrawDebug)
-	{
-		DrawDebugSphere(
-			GetWorld(),
-			PrisonCenter,
-			FinalBlastRadius,
-			32,
-			FColor::Red,
-			false,
-			TelegraphDuration + ActiveDurationBeforeFinalBlast
-		);
-
-		for (const FVector& Anchor : AnchorLocations)
-		{
-			DrawDebugSphere(
-				GetWorld(),
-				Anchor,
-				22.0f,
-				12,
-				FColor::Cyan,
-				false,
-				TelegraphDuration + ActiveDurationBeforeFinalBlast
-			);
-		}
-	}
-
 	UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -205,22 +179,6 @@ void ARunePrisonSkillActor::TriggerFinalBlast()
 	const float BlastRadius = FinalBlastRadius;
 
 	OnPrisonFinalBlast(BlastOrigin, BlastRadius);
-
-	if (bDrawDebug)
-	{
-		if (UWorld* World = GetWorld())
-		{
-			DrawDebugSphere(
-				World,
-				BlastOrigin,
-				BlastRadius,
-				32,
-				FColor::Orange,
-				false,
-				1.0f
-			);
-		}
-	}
 
 	ApplyFinalBlastDamage();
 

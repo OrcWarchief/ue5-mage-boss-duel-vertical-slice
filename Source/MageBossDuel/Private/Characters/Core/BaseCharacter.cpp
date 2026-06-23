@@ -79,6 +79,13 @@ ABaseCharacter::ABaseCharacter()
 	GetCharacterMovement()->bOrientRotationToMovement = false; 
 }
 
+void ABaseCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	UpdateManaRegeneration(DeltaTime);
+}
+
 void ABaseCharacter::SetInvulnerable(bool bNewInvulnerable)
 {
 	bIsInvulnerable = bNewInvulnerable;
@@ -125,6 +132,7 @@ void ABaseCharacter::ReviveForRespawn()
 	CurrentHealth = MaxHealth;
 	CurrentMana = MaxMana;
 	CurrentPoise = MaxPoise;
+	LastManaSpendTime = -9999.0f;
 
 	// SetCharacterState()는	 Dead에서 상태 변경 막음으로, 여기서 직접 설정.
 	CurrentState = ECharacterState::Idle;
@@ -168,6 +176,7 @@ void ABaseCharacter::InitializeStats_Implementation()
 	bIsAttacking = false;
 	bHasPerformedBasicAttackHit = false;
 	LastAttackTime = -9999.f;
+	LastManaSpendTime = -9999.0f;
 
 	bDeathSequenceStarted = false;
 	bDeathSequenceFinished = false;
@@ -351,10 +360,6 @@ bool ABaseCharacter::CanBasicAttack() const
 
 void ABaseCharacter::StartBasicAttack()
 {
-	if (bEnableCombatDebug)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("StartBasicAttack"));
-	}
 	if (!CanBasicAttack())
 	{
 		return;
@@ -423,11 +428,6 @@ void ABaseCharacter::PerformBasicAttackHitCheck_Implementation()
 
 void ABaseCharacter::EndBasicAttack()
 {
-	if (bEnableCombatDebug)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("End Basic Attack"));
-	}
-
 	if (!bIsAttacking)
 	{
 		return;
@@ -493,11 +493,6 @@ AActor* ABaseCharacter::FindLockOnTarget(
 		FCollisionShape::MakeSphere(MaxDistance),
 		QueryParams
 	);
-
-	if (bEnableCombatDebug)
-	{
-		DrawDebugSphere(World, SearchCenter, MaxDistance, 24, FColor::Cyan, false, 1.0f, 0, 1.0f);
-	}
 
 	if (!bAny) { return nullptr; }
 
@@ -991,6 +986,12 @@ bool ABaseCharacter::TryConsumeMana(float Cost)
 	}
 
 	CurrentMana = FMath::Clamp(CurrentMana - Cost, 0.f, MaxMana);
+
+	if (UWorld* World = GetWorld())
+	{
+		LastManaSpendTime = World->GetTimeSeconds();
+	}
+
 	BroadcastManaChanged();
 
 	return true;
@@ -1008,16 +1009,72 @@ void ABaseCharacter::BroadcastManaChanged()
 	OnManaChanged.Broadcast(CurrentMana, MaxMana, Percent);
 }
 
+void ABaseCharacter::SetMana(float NewMana)
+{
+	const float ClampedMana = FMath::Clamp(NewMana, 0.f, MaxMana);
+
+	if (FMath::IsNearlyEqual(ClampedMana, CurrentMana))
+	{
+		return;
+	}
+
+	CurrentMana = ClampedMana;
+	BroadcastManaChanged();
+}
+
+void ABaseCharacter::UpdateManaRegeneration(float DeltaTime)
+{
+	if (!bEnableManaRegeneration)
+	{
+		return;
+	}
+
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	if (MaxMana <= 0.f || ManaRegenRate <= 0.f)
+	{
+		return;
+	}
+
+	if (CurrentMana >= MaxMana)
+	{
+		return;
+	}
+	
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+
+	if ((Now - LastManaSpendTime) < ManaRegenDelayAfterSpend)
+	{
+		return;
+	}
+
+	SetMana(CurrentMana + ManaRegenRate * DeltaTime);
+}
+
 EHitReactionType ABaseCharacter::ResolveHitReaction(const FHitPayload& HitPayload, bool bPoiseBroken) const
 {
+	if (bPoiseBroken)
+	{
+		const EHitReactionType BreakReaction =
+			PoiseBreakReactionType == EHitReactionType::None
+			? EHitReactionType::HeavyStagger
+			: PoiseBreakReactionType;
+
+		return MaxHitReaction(HitPayload.ReactionType, BreakReaction);
+	}
+
 	if (HitPayload.bForceReaction)
 	{
 		return HitPayload.ReactionType;
-	}
-
-	if (bPoiseBroken)
-	{
-		return MaxHitReaction(HitPayload.ReactionType, EHitReactionType::HeavyStagger);
 	}
 
 	if (HitPayload.bCanInterrupt && CanBeInterrupted())

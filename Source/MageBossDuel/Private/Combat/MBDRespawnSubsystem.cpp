@@ -7,6 +7,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 
 void UMBDRespawnSubsystem::SetActiveRestPoint(FName RestPointId, FName LevelName, const FTransform& RespawnTransform)
@@ -48,7 +49,7 @@ bool UMBDRespawnSubsystem::RespawnPlayerAtActiveRestPoint(APlayerController* Pla
 	}
 
 	const FTransform& RespawnTransform = ActiveRestPoint.RespawnTransform;
-	const FVector RespawnLocation = RespawnTransform.GetLocation();
+	FVector RespawnLocation = RespawnTransform.GetLocation();
 
 	FRotator RespawnRotation = RespawnTransform.GetRotation().Rotator();
 	RespawnRotation.Pitch = 0.0f; // Ensure the player doesn't spawn with an unintended pitch
@@ -57,6 +58,29 @@ bool UMBDRespawnSubsystem::RespawnPlayerAtActiveRestPoint(APlayerController* Pla
 	if (UPawnMovementComponent* MovementComponent = PlayerPawn->GetMovementComponent())
 	{
 		MovementComponent->StopMovementImmediately();
+	}
+
+	UWorld* World = PlayerPawn->GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	// 저장된 위치 주변에서 캐릭터가 들어갈 수 있는 안전한 위치를 찾는다.
+	if (!World->FindTeleportSpot(
+		PlayerPawn,
+		RespawnLocation,
+		RespawnRotation
+	))
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("Failed to find a safe respawn spot near %s"),
+			*RespawnTransform.GetLocation().ToString()
+		);
+
+		return false;
 	}
 
 	const bool bTeleported = PlayerPawn->TeleportTo(
@@ -82,6 +106,14 @@ bool UMBDRespawnSubsystem::RespawnPlayerAtActiveRestPoint(APlayerController* Pla
 	{
 		BaseCharacter->ReviveForRespawn();
 	}
+
+	// 리스폰 후 PlayerController 입력 상태 복구
+	PlayerController->ResetIgnoreMoveInput();
+	PlayerController->ResetIgnoreLookInput();
+
+	FInputModeGameOnly InputMode;
+	PlayerController->SetInputMode(InputMode);
+	PlayerController->bShowMouseCursor = false;
 
 	return true;
 }

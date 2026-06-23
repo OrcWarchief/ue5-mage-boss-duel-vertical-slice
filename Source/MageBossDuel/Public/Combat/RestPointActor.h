@@ -10,6 +10,8 @@ class APawn;
 class USceneComponent;
 class USphereComponent;
 class UPrimitiveComponent;
+class APlayerCharacter;
+class UWidgetComponent;
 
 UCLASS()
 class MAGEBOSSDUEL_API ARestPointActor : public AActor
@@ -40,6 +42,8 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USceneComponent> SceneRoot;
 
@@ -48,6 +52,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USphereComponent> InteractionVolume;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UWidgetComponent> InteractionPromptWidget;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rest Point")
 	FName RestPointId = NAME_None;
@@ -74,6 +81,14 @@ private:
 	TWeakObjectPtr<APawn> FocusedPawn;
 
 	FName ResolveRestPointId() const;
+
+	bool RegisterAsActiveRestPoint();
+
+	bool CommitRestPointActivation(APawn* ActivatingPawn);
+
+	APlayerCharacter* ResolvePlayerCharacter(AActor* OtherActor) const;
+
+	void SetInteractionPromptVisible(bool bVisible);
 
 	UFUNCTION()
 	void HandleInteractionBeginOverlap(

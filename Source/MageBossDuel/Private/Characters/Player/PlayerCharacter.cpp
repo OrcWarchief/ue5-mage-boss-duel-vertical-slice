@@ -13,6 +13,43 @@
 #include "Engine/Engine.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
+#include "Projectiles/BaseMagicProjectile.h"
+#include "Combat/RestPointActor.h"
+#include "PlayerController/MBDPlayerController.h"
+
+void APlayerCharacter::DrawChargedShotDebug() const
+{
+#if !(UE_BUILD_SHIPPING)
+	if (!GEngine)
+	{
+		return;
+	}
+
+	const float ChargeRatio =
+		MaxChargedAttackTime > 0.0f
+		? FMath::Clamp(CurrentChargedAttackTime / MaxChargedAttackTime, 0.0f, 1.0f)
+		: 0.0f;
+
+	const bool bCanRelease =
+		CurrentChargedAttackTime >= MinChargedAttackTime;
+
+	const FString DebugText = FString::Printf(
+		TEXT("Q Charge | Charging: %s | Time: %.2f / %.2f | Ratio: %.2f | CanRelease: %s"),
+		bIsChargingAttack ? TEXT("TRUE") : TEXT("FALSE"),
+		CurrentChargedAttackTime,
+		MaxChargedAttackTime,
+		ChargeRatio,
+		bCanRelease ? TEXT("TRUE") : TEXT("FALSE")
+	);
+
+	GEngine->AddOnScreenDebugMessage(
+		1001,
+		0.0f,
+		bIsChargingAttack ? FColor::Cyan : FColor::White,
+		DebugText
+	);
+#endif
+}
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -46,6 +83,37 @@ void APlayerCharacter::Tick(float DeltaTime)
 	{
 		UpdateLockOn(DeltaTime);
 	}
+
+	if (bDrawChargedShotDebug)
+	{
+		DrawChargedShotDebug();
+	}
+
+	const UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+
+	if (GEngine && MoveComp)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			4242,
+			0.0f,
+			FColor::Yellow,
+			FString::Printf(
+				TEXT(
+					"Class=%s | Charge=%d | Release=%d | "
+					"MaxWalk=%.1f | GetMax=%.1f | Vel=%.1f | "
+					"Saved=%.1f | Mode=%d"
+				),
+				*GetClass()->GetName(),
+				bIsChargingAttack ? 1 : 0,
+				bChargedAttackReleasePending ? 1 : 0,
+				MoveComp->MaxWalkSpeed,
+				MoveComp->GetMaxSpeed(),
+				GetVelocity().Size2D(),
+				SavedChargedAttackMaxWalkSpeed,
+				static_cast<int32>(MoveComp->MovementMode)
+			)
+		);
+	}
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -73,6 +141,14 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	if (ensure(IA_Equip))		EIC->BindAction(IA_Equip,		ETriggerEvent::Started, this, &APlayerCharacter::Equip);
 	if (ensure(IA_Dodge))		EIC->BindAction(IA_Dodge,		ETriggerEvent::Started, this, &APlayerCharacter::Dodge);
 	if (ensure(IA_BasicAttack))	EIC->BindAction(IA_BasicAttack, ETriggerEvent::Started, this, &APlayerCharacter::BasicAttack);
+	if (ensure(IA_ChargedAttack))
+	{
+		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Started,   this, &APlayerCharacter::StartChargedAttack);
+		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Triggered, this, &APlayerCharacter::UpdateChargedAttack);
+		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Completed, this, &APlayerCharacter::ReleaseChargedAttack);
+		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Canceled,  this, &APlayerCharacter::CancelChargedAttack);
+	}
+	if (ensure(IA_Interact))	EIC->BindAction(IA_Interact,   ETriggerEvent::Started, this, &APlayerCharacter::HandleInteract);
 }
 
 void APlayerCharacter::SetCombatMode(EPlayerCombatMode NewCombatMode)
@@ -99,6 +175,8 @@ bool APlayerCharacter::CanStartStaffEquip() const
 	if (!IsAlive()) { return false; }
 
 	if (IsDodging() || IsStaffMode()) { return false; }
+
+	if (bIsChargingAttack) { return false; }
 
 	if (bStaffEquipInProgress) { return false; }
 
@@ -157,6 +235,19 @@ void APlayerCharacter::OnStaffEquipMontageEnded(UAnimMontage* Montage, bool bInt
 	}
 
 	SetStaffMode(true);
+}
+
+void APlayerCharacter::SetFocusedRestPoint(ARestPointActor* NewRestPoint)
+{
+	FocusedRestPoint = IsValid(NewRestPoint) ? NewRestPoint : nullptr;
+}
+
+void APlayerCharacter::ClearFocusedRestPoint(const ARestPointActor* RestPoint)
+{
+	if (FocusedRestPoint.Get() == RestPoint)
+	{
+		FocusedRestPoint.Reset();
+	}
 }
 
 void APlayerCharacter::BeginPlay()
@@ -232,10 +323,6 @@ void APlayerCharacter::ToggleLockOn(const FInputActionValue& Value)
 	{
 		StartLockOn(Target);
 	}
-	else if (bEnableLockOnDebug && GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, TEXT("LockOn: No Target"));
-	}
 }
 
 void APlayerCharacter::Jump()
@@ -245,17 +332,310 @@ void APlayerCharacter::Jump()
 
 void APlayerCharacter::Equip(const FInputActionValue& Value)
 {
+	if (bIsChargingAttack)
+	{
+		return;
+	}
+
 	StartStaffEquip();
 }
 
 void APlayerCharacter::Dodge(const FInputActionValue& Value)
 {
+	CancelChargedAttackInternal();
 	TryStartDodge(MovementVector);
 }
 
 void APlayerCharacter::BasicAttack(const FInputActionValue& Value)
 {
+	if (bIsChargingAttack)
+	{
+		return;
+	}
+
 	StartBasicAttack();
+}
+
+void APlayerCharacter::StartChargedAttack(const FInputActionValue& Value)
+{
+	if (!CanStartChargedAttack())
+	{
+		return;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	
+	UAnimMontage* Montage = ChargedAttackMontage.Get();
+
+	if (!AnimInstance || !ChargedAttackMontage)
+	{
+		return;
+	}
+
+	if (!Montage->IsValidSectionName(ChargedAttackStartSection) ||
+		!Montage->IsValidSectionName(ChargedAttackLoopSection) ||
+		!Montage->IsValidSectionName(ChargedAttackReleaseSection))
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT(
+				"[ChargedAttack] Invalid montage section. "
+				"Start='%s', Loop='%s', Release='%s'"
+			),
+			*ChargedAttackStartSection.ToString(),
+			*ChargedAttackLoopSection.ToString(),
+			*ChargedAttackReleaseSection.ToString()
+		);
+
+		return;
+	}
+
+	const float PlayedLength = AnimInstance->Montage_Play(ChargedAttackMontage, 1.0f);
+
+	if (PlayedLength <= 0.0f)
+	{
+		return;
+	}
+
+	bIsChargingAttack = true;
+	bChargedAttackReleasePending = false;
+	bChargedAttackReleaseResolved = false;
+
+	PendingChargedAttackRatio = 0.0f;
+	CurrentChargedAttackTime = 0.0f;
+	bChargedAttackFullyChargedNotified = false;
+
+	ApplyChargedAttackMovementRestriction();
+
+	AnimInstance->Montage_SetNextSection(ChargedAttackStartSection, ChargedAttackLoopSection, Montage);
+
+	AnimInstance->Montage_SetNextSection(ChargedAttackLoopSection, ChargedAttackLoopSection, Montage);
+
+	AnimInstance->Montage_JumpToSection(ChargedAttackStartSection, Montage);
+
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &APlayerCharacter::OnChargedAttackMontageEnded);
+
+	AnimInstance->Montage_SetEndDelegate(EndDelegate,ChargedAttackMontage);
+
+	OnChargedAttackStarted();
+	OnChargedAttackUpdated(0.0f, 0.0f);
+}
+
+void APlayerCharacter::UpdateChargedAttack(const FInputActionValue& Value)
+{
+	if (!bIsChargingAttack)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	CurrentChargedAttackTime = FMath::Min(
+		CurrentChargedAttackTime + World->GetDeltaSeconds(),
+		MaxChargedAttackTime
+	);
+
+	const float ChargeRatio = FMath::Clamp(
+		CurrentChargedAttackTime / MaxChargedAttackTime,
+		0.0f,
+		1.0f
+	);
+
+	OnChargedAttackUpdated(ChargeRatio, CurrentChargedAttackTime);
+
+	if (!bChargedAttackFullyChargedNotified && ChargeRatio >= 1.0f)
+	{
+		bChargedAttackFullyChargedNotified = true;
+		OnChargedAttackFullyCharged();
+	}
+}
+
+void APlayerCharacter::ReleaseChargedAttack(const FInputActionValue& Value)
+{
+	if (!bIsChargingAttack)
+	{
+		if (!bChargedAttackReleasePending)
+		{
+			CancelChargedAttackInternal();
+		}
+
+		return;
+	}
+
+	const float ChargeRatio = FMath::Clamp(
+		CurrentChargedAttackTime / MaxChargedAttackTime,
+		0.0f,
+		1.0f
+	);
+
+	const bool bEnoughCharge = CurrentChargedAttackTime >= MinChargedAttackTime;
+
+	if (!bEnoughCharge)
+	{
+		CancelChargedAttackInternal();
+		return;
+	}
+
+	bIsChargingAttack = false;
+	bChargedAttackReleasePending = true;
+	bChargedAttackReleaseResolved = false;
+	PendingChargedAttackRatio = ChargeRatio;
+
+	ApplyChargedAttackReleaseMovementRestriction();
+
+	SetCharacterState(ECharacterState::Attacking);
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+
+	if (!AnimInstance ||
+		!ChargedAttackMontage ||
+		!AnimInstance->Montage_IsPlaying(ChargedAttackMontage))
+	{
+		PerformChargedAttackRelease();
+		FinishChargedAttackSequence();
+		return;
+	}
+
+	AnimInstance->Montage_JumpToSection(ChargedAttackReleaseSection, ChargedAttackMontage);
+}
+
+void APlayerCharacter::CancelChargedAttack(const FInputActionValue& Value)
+{
+	if (bChargedAttackReleasePending)
+	{
+		return;
+	}
+
+	CancelChargedAttackInternal();
+}
+
+void APlayerCharacter::HandleInteract(const FInputActionValue& Value)
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	ARestPointActor* RestPoint = FocusedRestPoint.Get();
+
+	if (!IsValid(RestPoint))
+	{
+		FocusedRestPoint.Reset();
+		return;
+	}
+
+	if (!RestPoint->TryActivateRestPoint(this))
+	{
+		return;
+	}
+
+	if (AMBDPlayerController* PC = Cast<AMBDPlayerController>(Controller))
+	{
+		PC->ShowRestPointActivatedNotice();
+	}
+}
+
+bool APlayerCharacter::CanStartChargedAttack() const
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	if (bIsChargingAttack || bChargedAttackReleasePending)
+	{
+		return false;
+	}
+
+	if (const UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+	{
+		if (ChargedAttackMontage && AnimInstance->Montage_IsActive(ChargedAttackMontage))
+		{
+			return false;
+		}
+	}
+
+	if (IsDodging())
+	{
+		return false;
+	}
+
+	if (bStaffEquipInProgress)
+	{
+		return false;
+	}
+
+	const ECharacterState State = GetCurrentState();
+	if (State == ECharacterState::Hit ||
+		State == ECharacterState::Dead ||
+		State == ECharacterState::Attacking)
+	{
+		return false;
+	}
+
+	if (GetCurrentMana() < ChargedAttackManaCost)
+	{
+		return false;
+	}
+
+	return true;
+}
+
+void APlayerCharacter::CancelChargedAttackInternal()
+{
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+
+	UAnimMontage* Montage = ChargedAttackMontage.Get();
+
+	const bool bMontageActive = 
+		AnimInstance && 
+		Montage && 
+		AnimInstance->Montage_IsActive(Montage);
+
+	const bool bWasCharging = bIsChargingAttack;
+	const bool bWasReleasing = bChargedAttackReleasePending;
+
+	if (!bWasCharging &&
+		!bWasReleasing &&
+		!bMontageActive)
+	{
+		return;
+	}
+
+	const float SafeMaxChargeTime = FMath::Max(MaxChargedAttackTime, KINDA_SMALL_NUMBER);
+
+	const float ChargeRatio = bWasCharging ? FMath::Clamp(CurrentChargedAttackTime / SafeMaxChargeTime, 0.0f, 1.0f) : PendingChargedAttackRatio;
+
+	const bool bNeedsEndEvent =
+		bWasCharging ||
+		(bWasReleasing && !bChargedAttackReleaseResolved) ||
+		(!bWasCharging && !bWasReleasing && bMontageActive);
+
+	if (bNeedsEndEvent)
+	{
+		OnChargedAttackEnded(false, ChargeRatio);
+	}
+
+	bIsChargingAttack = false;
+	bChargedAttackReleasePending = false;
+	bChargedAttackReleaseResolved = false;
+
+	CurrentChargedAttackTime = 0.0f;
+	PendingChargedAttackRatio = 0.0f;
+	bChargedAttackFullyChargedNotified = false;
+
+	RestoreChargedAttackMovement();
+
+	if (bMontageActive)
+	{
+		AnimInstance->Montage_Stop(0.05f, Montage);
+	}
 }
 
 AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const
@@ -274,6 +654,20 @@ AActor* APlayerCharacter::GetLockOnTargetActor_Implementation() const
 	}
 
 	return LockOnTarget;
+}
+
+void APlayerCharacter::OnHitReaction_Implementation()
+{
+	CancelChargedAttackInternal();
+
+	Super::OnHitReaction_Implementation();
+}
+
+void APlayerCharacter::Die_Implementation()
+{
+	CancelChargedAttackInternal();
+
+	Super::Die_Implementation();
 }
 
 EDodgeDirection APlayerCharacter::ResolveDodgeDirection(const FVector2D& MoveInput, bool bHasDirectionalInput) const
@@ -311,6 +705,259 @@ UAnimMontage* APlayerCharacter::ResolveDodgeMontage(const FVector2D& MoveInput, 
 	return Super::ResolveDodgeMontage(MoveInput, Direction, bHasDirectionalInput);
 }
 
+void APlayerCharacter::OnChargedAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (Montage != ChargedAttackMontage.Get())
+	{
+		return;
+	}
+
+	const bool bSequenceWasActive = bIsChargingAttack || bChargedAttackReleasePending;
+
+	if (!bSequenceWasActive)
+	{
+		return;
+	}
+
+	if (!bChargedAttackReleaseResolved)
+	{
+		const float SafeMaxChargeTime =
+			FMath::Max(
+				MaxChargedAttackTime,
+				KINDA_SMALL_NUMBER
+			);
+
+		const float ChargeRatio =
+			bIsChargingAttack && MaxChargedAttackTime > 0.0f
+			? FMath::Clamp(
+				CurrentChargedAttackTime / SafeMaxChargeTime,
+				0.0f,
+				1.0f
+			)
+			: PendingChargedAttackRatio;
+
+		// Blueprint VFX와 오디오 정리
+		OnChargedAttackEnded(false, ChargeRatio);
+	}
+
+	FinishChargedAttackSequence();
+}
+
+bool APlayerCharacter::FireChargedAttack(float ChargeRatio)
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	if (!ChargedAttackProjectileClass)
+	{
+		return false;
+	}
+
+	if (GetCurrentMana() < ChargedAttackManaCost)
+	{
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	AActor* TargetActor = ResolveBasicAttackTarget();
+	const FTransform SpawnTransform = GetChargedAttackSpawnTransform(TargetActor);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	ABaseMagicProjectile* Projectile = World->SpawnActor<ABaseMagicProjectile>(
+		ChargedAttackProjectileClass,
+		SpawnTransform,
+		SpawnParams
+	);
+
+	if (!Projectile)
+	{
+		return false;
+	}
+
+	if (!TryConsumeMana(ChargedAttackManaCost))
+	{
+		Projectile->Destroy();
+		return false;
+	}
+
+	const FHitPayload Payload = BuildChargedAttackPayload(ChargeRatio);
+	Projectile->SetHitPayload(Payload);
+
+	OnChargedAttackFired(ChargeRatio, SpawnTransform);
+
+	return true;
+}
+
+FHitPayload APlayerCharacter::BuildChargedAttackPayload(float ChargeRatio) const
+{
+	const float ClampedRatio = FMath::Clamp(ChargeRatio, 0.0f, 1.0f);
+
+	FHitPayload Payload = MinChargedAttackHitPayload;
+
+	Payload.Damage = FMath::Lerp(
+		MinChargedAttackHitPayload.Damage, 
+		MaxChargedAttackHitPayload.Damage, 
+		ClampedRatio
+	);
+
+	Payload.PoiseDamage = FMath::Lerp(
+		MinChargedAttackHitPayload.PoiseDamage,
+		MaxChargedAttackHitPayload.PoiseDamage,
+		ClampedRatio
+	);
+
+	if (ClampedRatio >= 0.95f)
+	{
+		Payload.ReactionType = MaxChargedAttackHitPayload.ReactionType;
+		Payload.bForceReaction = MaxChargedAttackHitPayload.bForceReaction;
+		Payload.bIgnorePoise = MaxChargedAttackHitPayload.bIgnorePoise;
+	}
+
+	return Payload;
+}
+
+FTransform APlayerCharacter::GetChargedAttackSpawnTransform(AActor* TargetActor) const
+{
+	const FVector SpawnLocation = GetChargedAttackMuzzleLocation();
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetControllerViewPoint(ViewLocation, ViewRotation);
+
+	FRotator SpawnRotation = ViewRotation;
+
+	if (IsValid(TargetActor))
+	{
+		const FVector AimLocation = GetTargetAimLocation(TargetActor);
+		const FVector AimDirection = (AimLocation - SpawnLocation).GetSafeNormal();
+
+		if (!AimDirection.IsNearlyZero())
+		{
+			SpawnRotation = AimDirection.Rotation();
+		}
+	}
+
+	return FTransform(SpawnRotation, SpawnLocation);
+}
+
+FVector APlayerCharacter::GetChargedAttackMuzzleLocation() const
+{
+	if (StaffWeaponMesh)
+	{
+		if (StaffWeaponMesh->DoesSocketExist(ChargedAttackMuzzleSocketName))
+		{
+			return StaffWeaponMesh->GetSocketLocation(ChargedAttackMuzzleSocketName);
+		}
+
+		return StaffWeaponMesh->GetComponentLocation();
+	}
+
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		static const FName HandSocketName(TEXT("palm_r_Socket"));
+		if (MeshComp->DoesSocketExist(HandSocketName))
+		{
+			return MeshComp->GetSocketLocation(HandSocketName);
+		}
+	}
+
+	return GetActorLocation()
+		+ GetActorForwardVector() * ChargedAttackSpawnForwardOffset
+		+ FVector::UpVector * ChargedAttackSpawnUpOffset;
+}
+
+void APlayerCharacter::ApplyChargedAttackMovementRestriction()
+{
+	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	if (!MoveComp)
+	{
+		return;
+	}
+
+	if (!bHasSavedChargedAttackMoveSpeed)
+	{
+		SavedChargedAttackMaxWalkSpeed = MoveComp->MaxWalkSpeed;
+		bHasSavedChargedAttackMoveSpeed = true;
+	}
+
+	MoveComp->MaxWalkSpeed = SavedChargedAttackMaxWalkSpeed * FMath::Clamp(ChargedAttackMoveSpeedMultiplier, 0.0f, 1.0f);
+}
+
+void APlayerCharacter::ApplyChargedAttackReleaseMovementRestriction()
+{
+	if (!bLockMovementDuringChargedAttackRelease)
+	{
+		return;
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->MaxWalkSpeed = 0.0f;
+		MoveComp->StopMovementImmediately();
+	}
+}
+
+void APlayerCharacter::RestoreChargedAttackMovement()
+{
+	if (!bHasSavedChargedAttackMoveSpeed)
+	{
+		return;
+	}
+
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->MaxWalkSpeed = SavedChargedAttackMaxWalkSpeed;
+	}
+
+	SavedChargedAttackMaxWalkSpeed = 0.0f;
+	bHasSavedChargedAttackMoveSpeed = false;
+}
+
+void APlayerCharacter::FinishChargedAttackSequence()
+{
+	bIsChargingAttack = false;
+	bChargedAttackReleasePending = false;
+	bChargedAttackReleaseResolved = false;
+
+	CurrentChargedAttackTime = 0.0f;
+	PendingChargedAttackRatio = 0.0f;
+	bChargedAttackFullyChargedNotified = false;
+
+	RestoreChargedAttackMovement();
+
+	if (IsAlive() && GetCurrentState() == ECharacterState::Attacking)
+	{
+		SetCharacterState(GetVelocity().Size2D() > 3.0f ? ECharacterState::Moving : ECharacterState::Idle);
+	}
+}
+
+void APlayerCharacter::PerformChargedAttackRelease()
+{
+	if (!bChargedAttackReleasePending ||
+		bChargedAttackReleaseResolved)
+	{
+		return;
+	}
+
+	bChargedAttackReleaseResolved = true;
+
+	const bool bFired = FireChargedAttack(PendingChargedAttackRatio);
+
+	OnChargedAttackEnded(bFired, PendingChargedAttackRatio);
+}
+
 void APlayerCharacter::StartLockOn(AActor* NewTarget)
 {
 	if (!IsValid(NewTarget) || NewTarget == this) return;
@@ -321,12 +968,6 @@ void APlayerCharacter::StartLockOn(AActor* NewTarget)
 	// Lock On : character follow Controller Yaw;
 	bUseControllerRotationYaw = true;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
-
-	if (GEngine)
-	{
-		const FString Msg = FString::Printf(TEXT("StartLockOn() : Lock On (On) : %s"), *NewTarget->GetName());
-		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Green, Msg);
-	}
 }
 
 void APlayerCharacter::StopLockOn()
@@ -336,11 +977,6 @@ void APlayerCharacter::StopLockOn()
 
 	bUseControllerRotationYaw = false;
 	GetCharacterMovement()->bOrientRotationToMovement = true;
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Silver, TEXT("StopLockOn() : Lock On (Off)"));
-	}
 }
 
 void APlayerCharacter::UpdateLockOn(float DeltaTime)
@@ -386,11 +1022,6 @@ void APlayerCharacter::UpdateLockOn(float DeltaTime)
 	const FRotator CurrentControlRot = Controller->GetControlRotation();
 	const FRotator NextControlRot = FMath::RInterpTo(CurrentControlRot, DesiredRot, DeltaTime, LockOnInterpSpeed);
 	Controller->SetControlRotation(NextControlRot);
-
-	if (bEnableLockOnDebug && GEngine)
-	{
-		DrawDebugLine(GetWorld(), ViewLoc, AimLoc, FColor::Green, false, 0.f, 0, 0.2f);
-	}
 }
 
 void APlayerCharacter::OnTargetSwitchX(const FInputActionValue& Value)
