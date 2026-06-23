@@ -12,6 +12,7 @@ class UInputAction;
 class USpringArmComponent;
 class UCameraComponent;
 class UAnimMontage;
+class ARestPointActor;
 
 UENUM(BlueprintType)
 enum class EPlayerCombatMode : uint8
@@ -72,6 +73,12 @@ public:
 		return bIsChargingAttack || bChargedAttackReleasePending;
 	}
 
+	// ===== Rest Point =====
+
+	void SetFocusedRestPoint(ARestPointActor* NewRestPoint);
+
+	void ClearFocusedRestPoint(const ARestPointActor* RestPoint);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -102,6 +109,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_ChargedAttack = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Interact = nullptr;
+
 	FVector2D MovementVector = FVector2D::ZeroVector;
 
 	void Move(const FInputActionValue& Value);
@@ -117,6 +127,8 @@ protected:
 	void UpdateChargedAttack(const FInputActionValue& Value);
 	void ReleaseChargedAttack(const FInputActionValue& Value);
 	void CancelChargedAttack(const FInputActionValue& Value);
+
+	void HandleInteract(const FInputActionValue& Value);
 
 	bool CanStartChargedAttack() const;
 	void CancelChargedAttackInternal();
@@ -308,6 +320,9 @@ private:
 
 	bool TrySwitchLockOnTarget(int32 DirectionSign);
 	AActor* FindSwitchTarget(int32 DirectionSign) const;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<ARestPointActor> FocusedRestPoint;
 
 	// ===== Combat Mode =====
 

@@ -5,6 +5,8 @@
 #include "UI/HUD/PlayerHUDWidget.h"
 #include "UI/HUD/TargetHUDWidget.h"
 #include "Characters/Core/BaseCharacter.h"
+#include "Blueprint/UserWidget.h"
+#include "TimerManager.h"
 
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -12,6 +14,59 @@
 AMBDPlayerController::AMBDPlayerController()
 {
     bShowMouseCursor = false;
+}
+
+void AMBDPlayerController::ShowRestPointActivatedNotice()
+{
+    if (!IsLocalController())
+    {
+        return;
+    }
+
+	if (!RestPointActivatedWidgetClass)
+	{
+		return;
+	}
+
+    if (!RestPointActivatedWidget)
+    {
+		RestPointActivatedWidget = CreateWidget<UUserWidget>(this, RestPointActivatedWidgetClass);
+    }
+
+	if (!RestPointActivatedWidget)
+	{
+		return;
+	}
+
+    RestPointActivatedWidget->SetVisibility(ESlateVisibility::Visible);
+
+	if (!RestPointActivatedWidget->IsInViewport())
+	{
+		RestPointActivatedWidget->AddToViewport(20);
+	}
+
+	UWorld* World = GetWorld();
+
+	if (!World)
+	{
+		return;
+	}
+
+	World->GetTimerManager().ClearTimer(RestPointActivatedWidgetTimerHandle);
+
+	if (RestPointActivatedWidgetDuration <= 0.0f)
+	{
+		HideRestPointActivatedNotice();
+		return;
+	}
+
+	World->GetTimerManager().SetTimer(
+		RestPointActivatedWidgetTimerHandle,
+		this,
+		&AMBDPlayerController::HideRestPointActivatedNotice,
+		RestPointActivatedWidgetDuration,
+		false
+	);
 }
 
 void AMBDPlayerController::BeginPlay()
@@ -55,6 +110,24 @@ void AMBDPlayerController::BeginPlay()
     }
 }
 
+void AMBDPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(
+            RestPointActivatedWidgetTimerHandle
+        );
+    }
+
+    if (RestPointActivatedWidget)
+    {
+        RestPointActivatedWidget->RemoveFromParent();
+        RestPointActivatedWidget = nullptr;
+    }
+
+    Super::EndPlay(EndPlayReason);
+}
+
 void AMBDPlayerController::ApplyMappingContexts()
 {
     if (!GetLocalPlayer()) return;
@@ -70,4 +143,12 @@ void AMBDPlayerController::ApplyMappingContexts()
     {
         Subsystem->AddMappingContext(IMC_Combat, IMC_CombatPriority);
     }
+}
+
+void AMBDPlayerController::HideRestPointActivatedNotice()
+{
+	if (RestPointActivatedWidget)
+	{
+        RestPointActivatedWidget->RemoveFromParent();
+	}
 }

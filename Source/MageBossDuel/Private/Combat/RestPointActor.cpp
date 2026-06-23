@@ -11,10 +11,13 @@
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Combat/MBDRespawnSubsystem.h"
+#include "Characters/Player/PlayerCharacter.h"
+#include "Components/WidgetComponent.h"
+#include "Engine/GameInstance.h"
 
 ARestPointActor::ARestPointActor()
 {
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	RootComponent = SceneRoot;
@@ -30,32 +33,20 @@ ARestPointActor::ARestPointActor()
 	InteractionVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
 	InteractionVolume->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	InteractionVolume->SetGenerateOverlapEvents(true);
+
+	InteractionPromptWidget = CreateDefaultSubobject<UWidgetComponent>(TEXT("InteractionPromptWidget"));
+	InteractionPromptWidget->SetupAttachment(SceneRoot);
+	InteractionPromptWidget->SetRelativeLocation(FVector(0.0f, 0.0f, 140.0f));
+	InteractionPromptWidget->SetWidgetSpace(EWidgetSpace::Screen);
+	InteractionPromptWidget->SetDrawAtDesiredSize(true);
+	InteractionPromptWidget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	InteractionPromptWidget->SetGenerateOverlapEvents(false);
+	InteractionPromptWidget->SetHiddenInGame(true);
 }
 
 void ARestPointActor::ActivateRestPoint(APawn* ActivatingPawn)
 {
-	UGameInstance* GameInstance = GetGameInstance();
-	if (!GameInstance)
-	{
-		return;
-	}
-
-	UMBDRespawnSubsystem* RespawnSubsystem = GameInstance->GetSubsystem<UMBDRespawnSubsystem>();
-
-	if (!RespawnSubsystem)
-	{
-		return;
-	}
-
-	const FName CurrentLevelName = FName(*UGameplayStatics::GetCurrentLevelName(this, true));
-
-	RespawnSubsystem->SetActiveRestPoint(
-		ResolveRestPointId(),
-		CurrentLevelName,
-		GetRespawnTransform()
-	);
-
-	OnRestPointActivated(ActivatingPawn);
+	CommitRestPointActivation(ActivatingPawn);
 }
 
 bool ARestPointActor::TryActivateRestPoint(APawn* ActivatingPawn)
@@ -66,7 +57,12 @@ bool ARestPointActor::TryActivateRestPoint(APawn* ActivatingPawn)
 		return false;
 	}
 
-	ActivateRestPoint(ActivatingPawn);
+	if (!CommitRestPointActivation(ActivatingPawn))
+	{
+		OnRestPointActivationFailed(ActivatingPawn);
+		return false;
+	}
+
 	return true;
 }
 
@@ -99,10 +95,19 @@ void ARestPointActor::BeginPlay()
 {
 	Super::BeginPlay();
 
+	SetInteractionPromptVisible(false);
+
 	if (InteractionVolume)
 	{
-		InteractionVolume->OnComponentBeginOverlap.AddDynamic(this, &ARestPointActor::HandleInteractionBeginOverlap);
-		InteractionVolume->OnComponentEndOverlap.AddDynamic(this, &ARestPointActor::HandleInteractionEndOverlap);
+		InteractionVolume->OnComponentBeginOverlap.AddDynamic(
+			this,
+			&ARestPointActor::HandleInteractionBeginOverlap
+		);
+
+		InteractionVolume->OnComponentEndOverlap.AddDynamic(
+			this,
+			&ARestPointActor::HandleInteractionEndOverlap
+		);
 	}
 
 	if (bDrawDebugRespawnPoint)
@@ -119,8 +124,21 @@ void ARestPointActor::BeginPlay()
 
 	if (bSetAsDefaultOnBeginPlay)
 	{
-		ActivateRestPoint(nullptr);
+		RegisterAsActiveRestPoint();
 	}
+}
+
+void ARestPointActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (APlayerCharacter* PlayerCharacter = Cast<APlayerCharacter>(FocusedPawn.Get()))
+	{
+		PlayerCharacter->ClearFocusedRestPoint(this);
+	}
+
+	FocusedPawn.Reset();
+	SetInteractionPromptVisible(false);
+
+	Super::EndPlay(EndPlayReason);
 }
 
 FName ARestPointActor::ResolveRestPointId() const
@@ -133,34 +151,133 @@ FName ARestPointActor::ResolveRestPointId() const
 	return GetFName();
 }
 
+bool ARestPointActor::RegisterAsActiveRestPoint()
+{
+	UGameInstance* GameInstance = GetGameInstance();
+
+	if (!GameInstance)
+	{
+		return false;
+	}
+
+	UMBDRespawnSubsystem* RespawnSubsystem = GameInstance->GetSubsystem<UMBDRespawnSubsystem>();
+
+	if (!RespawnSubsystem)
+	{
+		return false;
+	}
+
+	const FName CurrentLevelName = FName(*UGameplayStatics::GetCurrentLevelName(this, true));
+
+	RespawnSubsystem->SetActiveRestPoint(
+		ResolveRestPointId(),
+		CurrentLevelName,
+		GetRespawnTransform()
+	);
+
+	return true;
+}
+
+bool ARestPointActor::CommitRestPointActivation(APawn* ActivatingPawn)
+{
+	if (!RegisterAsActiveRestPoint())
+	{
+		return false;
+	}
+
+	if (!IsValid(ActivatingPawn))
+	{
+		return false;
+	}
+
+	if (!ActivatingPawn->IsPlayerControlled())
+	{
+		return false;
+	}
+
+	OnRestPointActivated(ActivatingPawn);
+
+	return true;
+}
+
+APlayerCharacter* ARestPointActor::ResolvePlayerCharacter(AActor* OtherActor) const
+{
+	APlayerCharacter* PlayerCharacter = Cast<APlayerCharacter>(OtherActor);
+
+	if (!IsValid(PlayerCharacter))
+	{
+		return nullptr;
+	}
+
+	if (!PlayerCharacter->IsPlayerControlled())
+	{
+		return nullptr;
+	}
+
+	return PlayerCharacter;
+}
+
+void ARestPointActor::SetInteractionPromptVisible(bool bVisible)
+{
+	if (InteractionPromptWidget)
+	{
+		InteractionPromptWidget->SetHiddenInGame(!bVisible);
+	}
+}
+
 void ARestPointActor::HandleInteractionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	APawn* Pawn = Cast<APawn>(OtherActor);
-	if (!IsValid(Pawn))
+	APlayerCharacter* PlayerCharacter = ResolvePlayerCharacter(OtherActor);
+
+	if (!PlayerCharacter)
 	{
 		return;
 	}
 
-	FocusedPawn = Pawn;
+	if (FocusedPawn.Get() == PlayerCharacter)
+	{
+		return;
+	}
 
-	OnRestPointFocusChanged(Pawn, true);
+	if (FocusedPawn.IsValid())
+	{
+		return;
+	}
+
+	FocusedPawn = PlayerCharacter;
+
+	PlayerCharacter->SetFocusedRestPoint(this);
+
+	SetInteractionPromptVisible(true);
+
+	OnRestPointFocusChanged(PlayerCharacter, true);
 }
 
 void ARestPointActor::HandleInteractionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-	APawn* Pawn = Cast<APawn>(OtherActor);
-	if (!IsValid(Pawn))
+	APlayerCharacter* PlayerCharacter = Cast<APlayerCharacter>(OtherActor);
+
+	if (!IsValid(PlayerCharacter))
 	{
 		return;
 	}
 
-	if (FocusedPawn.Get() != Pawn)
+	if (FocusedPawn.Get() != PlayerCharacter)
 	{
 		return;
 	}
 
-	FocusedPawn = nullptr;
+	if (InteractionVolume && InteractionVolume->IsOverlappingActor(PlayerCharacter))
+	{
+		return;
+	}
 
-	OnRestPointFocusChanged(Pawn, false);
+	PlayerCharacter->ClearFocusedRestPoint(this);
+
+	FocusedPawn.Reset();
+
+	SetInteractionPromptVisible(false);
+
+	OnRestPointFocusChanged(PlayerCharacter, false);
 }
 

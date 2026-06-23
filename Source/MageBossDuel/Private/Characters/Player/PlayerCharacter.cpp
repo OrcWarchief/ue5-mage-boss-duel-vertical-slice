@@ -14,6 +14,8 @@
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
 #include "Projectiles/BaseMagicProjectile.h"
+#include "Combat/RestPointActor.h"
+#include "PlayerController/MBDPlayerController.h"
 
 void APlayerCharacter::DrawChargedShotDebug() const
 {
@@ -146,6 +148,7 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Completed, this, &APlayerCharacter::ReleaseChargedAttack);
 		EIC->BindAction(IA_ChargedAttack, ETriggerEvent::Canceled,  this, &APlayerCharacter::CancelChargedAttack);
 	}
+	if (ensure(IA_Interact))	EIC->BindAction(IA_Interact,   ETriggerEvent::Started, this, &APlayerCharacter::HandleInteract);
 }
 
 void APlayerCharacter::SetCombatMode(EPlayerCombatMode NewCombatMode)
@@ -232,6 +235,19 @@ void APlayerCharacter::OnStaffEquipMontageEnded(UAnimMontage* Montage, bool bInt
 	}
 
 	SetStaffMode(true);
+}
+
+void APlayerCharacter::SetFocusedRestPoint(ARestPointActor* NewRestPoint)
+{
+	FocusedRestPoint = IsValid(NewRestPoint) ? NewRestPoint : nullptr;
+}
+
+void APlayerCharacter::ClearFocusedRestPoint(const ARestPointActor* RestPoint)
+{
+	if (FocusedRestPoint.Get() == RestPoint)
+	{
+		FocusedRestPoint.Reset();
+	}
 }
 
 void APlayerCharacter::BeginPlay()
@@ -497,6 +513,32 @@ void APlayerCharacter::CancelChargedAttack(const FInputActionValue& Value)
 	}
 
 	CancelChargedAttackInternal();
+}
+
+void APlayerCharacter::HandleInteract(const FInputActionValue& Value)
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+
+	ARestPointActor* RestPoint = FocusedRestPoint.Get();
+
+	if (!IsValid(RestPoint))
+	{
+		FocusedRestPoint.Reset();
+		return;
+	}
+
+	if (!RestPoint->TryActivateRestPoint(this))
+	{
+		return;
+	}
+
+	if (AMBDPlayerController* PC = Cast<AMBDPlayerController>(Controller))
+	{
+		PC->ShowRestPointActivatedNotice();
+	}
 }
 
 bool APlayerCharacter::CanStartChargedAttack() const
